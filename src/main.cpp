@@ -38,6 +38,8 @@ bool runGpu = true;
 bool displayGpu = true;
 bool writeImages = false;
 
+/// change here
+
 
 int main(){
     cout << "Beginning of the project!" << endl;
