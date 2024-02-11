@@ -45,16 +45,18 @@ void displayGL();
 float alpha = 0; // Current rotation angle
 bool animate = true; // Flag to control animation
 
+// Gaussian filter -- Done
 cv::Mat applyGaussianBlur(const cv::Mat& src, int kernelSize, double sigma) {
     cv::Mat dst;
     cv::GaussianBlur(src, dst, cv::Size(kernelSize, kernelSize), sigma, sigma);
     return dst;
 }
 
+// Compute image gradient -- Done
 cv::Mat calculateGradientSobel(const cv::Mat& src, cv::Mat& direction) {
     cv::Mat grad_x, grad_y;
-    cv::Sobel(src, grad_x, CV_32F, 1, 0, 3);
-    cv::Sobel(src, grad_y, CV_32F, 0, 1, 3);
+    cv::Sobel(src, grad_x, CV_64F, 1, 0, 3); // originally, using CV_32F
+    cv::Sobel(src, grad_y, CV_64F, 0, 1, 3);
 
     cv::Mat gradient;
     cv::magnitude(grad_x, grad_y, gradient);
@@ -152,21 +154,27 @@ cv::Mat performCannyEdgeDetection(const cv::Mat& inputImage, double gaussianSigm
     // Convert image to floating-point type
     cv::Mat img;
     inputImage.convertTo(img, CV_32F, 1.0 / 255);
-
+    cv::imshow("inputImage", inputImage);
     // Step 1: Gaussian Blur
     imgBlurred = applyGaussianBlur(img, kernelSize, gaussianSigma);
+    cv::imshow("imgBlurred", imgBlurred);
 
     // Step 2: Gradient Calculation (Sobel Operator)
     gradient = calculateGradientSobel(imgBlurred, direction);
+    cv::imshow("gradient", gradient);
 
     // Step 3: Non-maximum Suppression
     nonMaxSuppressed = nonMaximumSuppression(gradient, direction);
+    nonMaxSuppressed.convertTo(nonMaxSuppressed, CV_8U);
+    cv::imshow("nonMaxSuppressed", nonMaxSuppressed);
 
     // Step 4: Double Threshold and Edge Tracking by Hysteresis
     cannyEdges = doubleThresholdHysteresis(nonMaxSuppressed, lowThreshold, highThreshold);
+    // cv::imshow("cannyEdges", cannyEdges);
 
     // Convert results to displayable format
-    cannyEdges.convertTo(cannyEdges, CV_8U, 255);
+    cannyEdges.convertTo(cannyEdges, CV_8U);
+    cv::imshow("cannyEdges", cannyEdges);
 
     return cannyEdges;
 }
@@ -176,19 +184,19 @@ int main(int argc, char** argv){
     cout << "OpenCL Exercise 4: Volume Rendering" << std::endl;
     cout << "------------------------------------------------" << std::endl;
     // Initialize GLUT
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
-
-    // Create a window with GLUT
-    glutInitWindowSize(800, 600); // Specify your desired window size
-    glutCreateWindow("Canny Edge Detection");
-
-    // Initialize GLEW
-    GLenum glewInitResult = glewInit();
-    if (GLEW_OK != glewInitResult) {
-        cerr << "ERROR: " << glewGetErrorString(glewInitResult) << endl;
-        return EXIT_FAILURE;
-    }
+    // glutInit(&argc, argv);
+    // glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
+    //
+    // // Create a window with GLUT
+    // glutInitWindowSize(800, 600); // Specify your desired window size
+    // glutCreateWindow("Canny Edge Detection");
+    //
+    // // Initialize GLEW
+    // GLenum glewInitResult = glewInit();
+    // if (GLEW_OK != glewInitResult) {
+    //     cerr << "ERROR: " << glewGetErrorString(glewInitResult) << endl;
+    //     return EXIT_FAILURE;
+    // }
     // Initialize OpenCL
     // vector<cl::Platform> platforms;
     // cl::Platform::get(&platforms);
@@ -214,19 +222,21 @@ int main(int argc, char** argv){
     // auto err = program.build("-cl-std=CL1.2");
 
     // Load image using OpenCV
-    cv::Mat img = cv::imread("test1.png", cv::IMREAD_GRAYSCALE);
+    cv::Mat img = cv::imread("../test1.png", cv::IMREAD_GRAYSCALE);
     if (img.empty()) {
         cerr << "Failed to load image\n";
         return -1;
     }
+    cv::imshow("Original", img);
     double gaussianSigma = 1.4;
-    int kernelSize = 5;
+    int kernelSize = 3;
     double lowThreshold = 0.05;
     double highThreshold = 0.15;
 
     cv::Mat cannyEdges = performCannyEdgeDetection(img, gaussianSigma, kernelSize, lowThreshold, highThreshold);
 
-    cv::namedWindow("Canny Edges", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("Canny Edges", cv::WINDOW_AUTOSIZE);
+    // cv::imshow("Original", img);
     cv::imshow("Canny Edges", cannyEdges);
     cv::waitKey(0); // Wait for a keystroke in the window
 

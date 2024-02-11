@@ -9,6 +9,8 @@
 
 // OpenCV header
 #include <opencv2/opencv.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 
 // Undefine Status if defined
 #ifdef Status
@@ -32,38 +34,145 @@
 #include <boost/lexical_cast.hpp>
 
 using namespace std;
-
+using namespace cv;
 bool runCpu = true;
 bool runGpu = true;
 bool displayGpu = true;
 bool writeImages = false;
 
 
-int main(){
-    cout << "Beginning of the project!" << endl;
-    cv::Mat img = cv::imread("../test1.png");
-    if (img.empty()) {
-        std::cout << "cannot read the image" << std::endl;
-        return -1;
-    }
+int main(int argc, char* argv[]) {
 
-    cv::Mat gray;
-    cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+  // load image
+  String imgName;
+  if (argc > 1)
+    imgName = argv[1];
+  else
+    imgName = "lena.png";
 
-    cv::Mat blurred;
-    GaussianBlur(gray, blurred, cv::Size(5, 5), 1.5);
+  String imgPath = "../" + imgName;
 
-    cv::Mat canny;
-    double low_threshold = 50.0;
-    double high_threshold = 150.0;
-    Canny(blurred, canny, low_threshold, high_threshold);
+  Mat src = imread(imgPath, IMREAD_GRAYSCALE);
 
-    cv::namedWindow("original", cv::WINDOW_AUTOSIZE);
-    cv::imshow("original", img);
-
-    cv::namedWindow("Canny Edge Detection", cv::WINDOW_AUTOSIZE);
-    cv::imshow("Canny Edge Detection", canny);
-
-    cv::waitKey(0);
+  if (src.empty()) {
+    std::cout << imgName + " is not a valid image." << std::endl;
     return 0;
+  }
+
+  imshow("src", src);
+
+  // apply Gaussian filter
+  Mat blurred;
+  blur(src, blurred, Size(3,3));
+  imshow("blurred", blurred);
+
+  // compute image gradient
+  Mat xComponent, yComponent;
+  Sobel(blurred, xComponent, CV_32F, 1, 0, 3);
+  Sobel(blurred, yComponent, CV_32F, 0, 1, 3);
+
+  // convert to polar coordinates
+  Mat magnitude, angle;
+  cartToPolar(xComponent, yComponent, magnitude, angle, true);
+
+  // normalize values
+  normalize(magnitude, magnitude, 0, 1, NORM_MINMAX);
+
+  // apply non-maximum suppression
+  int neighbor1X, neighbor1Y, neighbor2X, neighbor2Y;
+  float gradientAngle;
+  for (int x = 0; x < blurred.rows; x++) {
+    for (int y = 0; y < blurred.cols; y++) {
+      gradientAngle = angle.at<float>(y, x);
+      if (abs(gradientAngle) > 180)
+        gradientAngle = abs(gradientAngle-180);
+      else
+        gradientAngle = abs(gradientAngle);
+
+      if (gradientAngle <= 22.5) {
+        neighbor1X = x-1;
+        neighbor1Y = y;
+        neighbor2X = x+1;
+        neighbor2Y = y;
+      } else if (22.5 < gradientAngle <= 67.5) {
+        neighbor1X = x-1;
+        neighbor1Y = y-1;
+        neighbor2X = x+1;
+        neighbor2Y = y+1;
+      } else if (67.5 < gradientAngle <= 112.5) {
+        neighbor1X = x;
+        neighbor1Y = y-1;
+        neighbor2X = x;
+        neighbor2Y = y+1;
+      } else if (112.5 < gradientAngle <= 157.5) {
+        neighbor1X = x-1;
+        neighbor1Y = y+1;
+        neighbor2X = x+1;
+        neighbor2Y = y-1;
+      } else if (157.5 < gradientAngle <= 202.5) {
+        neighbor1X = x-1;
+        neighbor1Y = y;
+        neighbor2X = x+1;
+        neighbor2Y = y;
+      }
+
+      if ((0 <= neighbor1X < blurred.rows) && (0 <= neighbor1Y < blurred.cols)) {
+        if (magnitude.at<float>(y, x) < magnitude.at<float>(neighbor1Y, neighbor1X)) {
+          magnitude.at<float>(y, x) = 0;
+          continue;
+        }
+      }
+      if ((0 <= neighbor2X < blurred.rows) && (0 <= neighbor2Y < blurred.cols)) {
+        if (magnitude.at<float>(y, x) < magnitude.at<float>(neighbor2Y, neighbor2X)) {
+          magnitude.at<float>(y, x) = 0;
+          continue;
+        }
+      }
+    }
+  }
+  imshow("non-max suppression", magnitude);
+
+  // apply double thresholding
+  float magMax = 0.2, magMin = 0.1;
+  Mat strong = Mat::zeros(magnitude.rows, magnitude.cols, CV_32F);
+  Mat weak = Mat::zeros(magnitude.rows, magnitude.cols, CV_32F);
+  Mat suppress = Mat::zeros(magnitude.rows, magnitude.cols, CV_32F);
+  float gradientMagnitude;
+  for (int x = 0; x < magnitude.cols; x++) {
+    for (int y = 0; y < magnitude.rows; y++) {
+      gradientMagnitude = magnitude.at<float>(x, y);
+
+      if (gradientMagnitude > magMax)
+        strong.at<float>(x, y) = gradientMagnitude;
+      else if (gradientMagnitude <= magMax && gradientMagnitude > magMin)
+        weak.at<float>(x, y) = gradientMagnitude;
+      else
+        suppress.at<float>(x, y) = gradientMagnitude;
+    }
+  }
+  imshow("strong", strong);
+  imshow("weak", weak);
+  imshow("suppress", suppress);
+
+  // apply hysteresis
+  for (int x = 0; x < weak.cols; x++) {
+     for (int y = 0; y < weak.rows; y++) {
+       if (weak.at<float>(x, y) != 0) {
+         if ((strong.at<float>(x+1, y))
+         || (strong.at<float>(x-1, y))
+         || (strong.at<float>(x, y+1))
+         || (strong.at<float>(x, y-1))
+         || (strong.at<float>(x-1, y-1))
+         || (strong.at<float>(x+1, x-1))
+         || (strong.at<float>(x-1, y+1))
+         || (strong.at<float>(x+1, y-1)))
+           strong.at<float>(x, y) = weak.at<float>(x, y);
+       }
+     }
+   }
+
+  imshow("final edge detection", strong);
+
+  waitKey(0);
+  return 0;
 }
