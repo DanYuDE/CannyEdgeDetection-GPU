@@ -16,7 +16,7 @@
 #endif
 
 // OpenGL and X11 headers
-#include <GL/glew.h>
+//#include <GL/glew.h>
 #include <GL/freeglut.h>
 #include <GL/glx.h>
 
@@ -32,265 +32,185 @@
 #include <boost/lexical_cast.hpp>
 
 using namespace std;
+using namespace cv;
 
 bool runCpu = true;
 bool runGpu = true;
 bool displayGpu = true;
 bool writeImages = false;
 
-// OpenGL
-void keyboardGL(unsigned char key, int x, int y);
-void displayGL();
 
-float alpha = 0; // Current rotation angle
-bool animate = true; // Flag to control animation
+//////////////////////////////////////////////////////////////////////////////
+// Main function
+//////////////////////////////////////////////////////////////////////////
+int main ( int argc, char* argv[] ) {
+    cout << "Beginning of the project!" << endl;
+    // Create Context
+    cl::Context context(CL_DEVICE_TYPE_GPU);
+    // Device list
+    int deviceNr = argc < 2 ? 1 : atoi(argv[1]);
+    cout << "Using device " << deviceNr << " / "
+            << context.getInfo<CL_CONTEXT_DEVICES>().size() << std::endl;
+    ASSERT(deviceNr > 0);
+    ASSERT((size_t)deviceNr <= context.getInfo<CL_CONTEXT_DEVICES>().size());
 
-// Gaussian filter -- Done
-cv::Mat applyGaussianBlur(const cv::Mat& src, int kernelSize, double sigma) {
-    cv::Mat dst;
-    cv::GaussianBlur(src, dst, cv::Size(kernelSize, kernelSize), sigma, sigma);
-    return dst;
-}
+    cout << "Context has " << context.getInfo<CL_CONTEXT_DEVICES>().size() << " devices" << endl;
+    vector<cl::Device> device;
+    device.push_back(device[0]);
+    OpenCL::printDeviceInfo(cout, device);
 
-// Compute image gradient -- Done
-cv::Mat calculateGradientSobel(const cv::Mat& src, cv::Mat& direction) {
-    cv::Mat grad_x, grad_y;
-    cv::Sobel(src, grad_x, CV_64F, 1, 0, 3); // originally, using CV_32F
-    cv::Sobel(src, grad_y, CV_64F, 0, 1, 3);
+    // Create a command queue
+    queue = cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE);
 
-    cv::Mat gradient;
-    cv::magnitude(grad_x, grad_y, gradient);
-    cv::phase(grad_x, grad_y, direction, true);
-    return gradient;
-}
+    // Load the source code
+    extern unsigned char CannyEdgeDetection_cl[];
+    extern unsigned int CannyEdgeDetection_cl_len;
+    cl::Program program(context,
+                      std::string((const char*)CannyEdgeDetection_cl,
+                                  CannyEdgeDetection_cl_len));
 
+    OpenCL::buildProgram(program, devices);
 
-cv::Mat nonMaximumSuppression(const cv::Mat& gradient, const cv::Mat& direction) {
-    cv::Mat nonMaxSuppressed = cv::Mat::zeros(gradient.size(), CV_32F);
+    // Declare some values -----------------------------------
+    size_t wgSizeX =
 
-    for (int y = 1; y < gradient.rows - 1; y++) {
-        for (int x = 1; x < gradient.cols - 1; x++) {
-            float angle = direction.at<float>(y, x);
-            float neighbor1 = 0.0, neighbor2 = 0.0;
+    // load image
+    String imgName;
+    if ( argc > 1 )
+        imgName = argv[1];
+    else
+        imgName = "test1.png";
 
-            // Horizontal edge
-            if ((angle >= -22.5 && angle <= 22.5) || (angle <= -157.5 || angle >= 157.5)) {
-                neighbor1 = gradient.at<float>(y, x - 1);
-                neighbor2 = gradient.at<float>(y, x + 1);
-            }
-            // Diagonal (45 degrees)
-            else if ((angle > 22.5 && angle < 67.5) || (angle < -112.5 && angle > -157.5)) {
-                neighbor1 = gradient.at<float>(y - 1, x + 1);
-                neighbor2 = gradient.at<float>(y + 1, x - 1);
-            }
-            // Vertical edge
-            else if ((angle >= 67.5 && angle <= 112.5) || (angle <= -67.5 && angle >= -112.5)) {
-                neighbor1 = gradient.at<float>(y - 1, x);
-                neighbor2 = gradient.at<float>(y + 1, x);
-            }
-            // Diagonal (135 degrees)
-            else if ((angle > 112.5 && angle < 157.5) || (angle < -22.5 && angle > -67.5)) {
-                neighbor1 = gradient.at<float>(y - 1, x - 1);
-                neighbor2 = gradient.at<float>(y + 1, x + 1);
-            }
+    String imgPath = "../" + imgName;
 
-            float magnitude = gradient.at<float>(y, x);
-            if (magnitude >= neighbor1 && magnitude >= neighbor2) {
-                nonMaxSuppressed.at<float>(y, x) = magnitude;
-            } else {
-                nonMaxSuppressed.at<float>(y, x) = 0.0;
-            }
+    Mat src = imread ( imgPath, IMREAD_GRAYSCALE );
+
+    if ( src.empty() ) {
+        std::cout << imgName + " is not a valid image." << std::endl;
+        return 0;
         }
-    }
 
-    return nonMaxSuppressed;
-}
+    imshow ( "src", src );
 
-cv::Mat doubleThresholdHysteresis(const cv::Mat& src, double lowThresh, double highThresh) {
-    cv::Mat dst = cv::Mat::zeros(src.size(), src.type());
+    // apply Gaussian filter
+    Mat blurred;
+    blur ( src, blurred, Size ( 3,3 ) );
+    imshow ( "blurred", blurred );
 
-    // Define thresholds
-    float lowerBound = lowThresh * 255;
-    float upperBound = highThresh * 255;
+    // compute image gradient
+    Mat xComponent, yComponent;
+    Sobel ( blurred, xComponent, CV_32F, 1, 0, 3 );
+    Sobel ( blurred, yComponent, CV_32F, 0, 1, 3 );
 
-    // Apply thresholds
-    for (int y = 0; y < src.rows; y++) {
-        for (int x = 0; x < src.cols; x++) {
-            float val = src.at<float>(y, x);
-            if (val >= upperBound) {
-                dst.at<float>(y, x) = 255;
-            } else if (val >= lowerBound) {
-                dst.at<float>(y, x) = 125; // Weak edge
-            }
-        }
-    }
+    // convert to polar coordinates
+    Mat magnitude, angle;
+    cartToPolar ( xComponent, yComponent, magnitude, angle, true );
 
-    // Edge tracking by hysteresis
-    for (int y = 1; y < src.rows - 1; y++) {
-        for (int x = 1; x < src.cols - 1; x++) {
-            if (dst.at<float>(y, x) == 125) { // Check for weak edges
-                // Check 8-neighbors for strong edges
-                if (dst.at<float>(y-1, x-1) == 255 || dst.at<float>(y-1, x) == 255 || dst.at<float>(y-1, x+1) == 255 ||
-                    dst.at<float>(y, x-1) == 255 || dst.at<float>(y, x+1) == 255 ||
-                    dst.at<float>(y+1, x-1) == 255 || dst.at<float>(y+1, x) == 255 || dst.at<float>(y+1, x+1) == 255) {
-                    dst.at<float>(y, x) = 255; // Promote to strong edge
-                } else {
-                    dst.at<float>(y, x) = 0; // Suppress weak edge
+    // normalize values
+    normalize ( magnitude, magnitude, 0, 1, NORM_MINMAX );
+
+
+    // Apply non-maximum suppression
+    int neighbor1X, neighbor1Y, neighbor2X, neighbor2Y;
+    float gradientAngle;
+
+    for ( int x = 0; x < blurred.rows; x++ ) {
+        for ( int y = 0; y < blurred.cols; y++ ) {
+            gradientAngle = angle.at<float> ( x, y ); // Corrected index order
+
+            // Normalize angle to be in the range [0, 180)
+            gradientAngle = fmodf ( fabs ( gradientAngle ), 180.0f );
+
+            // Determine neighbors based on gradient angle
+            if ( gradientAngle <= 22.5f || gradientAngle > 157.5f ) {
+                neighbor1X = x - 1;
+                neighbor1Y = y;
+                neighbor2X = x + 1;
+                neighbor2Y = y;
+                }
+            else if ( gradientAngle <= 67.5f ) {
+                neighbor1X = x - 1;
+                neighbor1Y = y - 1;
+                neighbor2X = x + 1;
+                neighbor2Y = y + 1;
+                }
+            else if ( gradientAngle <= 112.5f ) {
+                neighbor1X = x;
+                neighbor1Y = y - 1;
+                neighbor2X = x;
+                neighbor2Y = y + 1;
+                }
+            else {   // angle > 112.5f && angle <= 157.5f
+                neighbor1X = x - 1;
+                neighbor1Y = y + 1;
+                neighbor2X = x + 1;
+                neighbor2Y = y - 1;
+                }
+
+            // Check bounds of neighbor1
+            if ( neighbor1X >= 0 && neighbor1X < blurred.rows && neighbor1Y >= 0 && neighbor1Y < blurred.cols ) {
+                if ( magnitude.at<float> ( x, y ) < magnitude.at<float> ( neighbor1X, neighbor1Y ) ) {
+                    magnitude.at<float> ( x, y ) = 0;
+                    continue;
+                    }
+                }
+
+            // Check bounds of neighbor2
+            if ( neighbor2X >= 0 && neighbor2X < blurred.rows && neighbor2Y >= 0 && neighbor2Y < blurred.cols ) {
+                if ( magnitude.at<float> ( x, y ) < magnitude.at<float> ( neighbor2X, neighbor2Y ) ) {
+                    magnitude.at<float> ( x, y ) = 0;
+                    continue;
+                    }
                 }
             }
         }
-    }
 
-    return dst;
-}
+    imshow ( "non-max suppression", magnitude );
 
 
-//////////////////////////////////////////////////////////////////////////////////////
-// CPU Implementation
-//////////////////////////////////////////////////////////////////////////////////////
-cv::Mat performCannyEdgeDetection(const cv::Mat& inputImage, double gaussianSigma, int kernelSize, double lowThreshold, double highThreshold) {
-    cv::Mat imgBlurred, gradient, direction, nonMaxSuppressed, cannyEdges;
+    // apply double thresholding
+    float magMax = 0.2, magMin = 0.1;
+    Mat strong = Mat::zeros ( magnitude.rows, magnitude.cols, CV_32F );
+    Mat weak = Mat::zeros ( magnitude.rows, magnitude.cols, CV_32F );
+    Mat suppress = Mat::zeros ( magnitude.rows, magnitude.cols, CV_32F );
+    float gradientMagnitude;
 
-    // Convert image to floating-point type
-    cv::Mat img;
-    inputImage.convertTo(img, CV_32F, 1.0 / 255);
-    cv::imshow("inputImage", inputImage);
-    // Step 1: Gaussian Blur
-    imgBlurred = applyGaussianBlur(img, kernelSize, gaussianSigma);
-    cv::imshow("imgBlurred", imgBlurred);
+    for ( int x = 0; x < magnitude.rows; x++ ) {
+        for ( int y = 0; y < magnitude.cols; y++ ) {
+            gradientMagnitude = magnitude.at<float> ( x, y );
 
-    // Step 2: Gradient Calculation (Sobel Operator)
-    gradient = calculateGradientSobel(imgBlurred, direction);
-    cv::imshow("gradient", gradient);
+            if ( gradientMagnitude > magMax )
+                strong.at<float> ( x, y ) = gradientMagnitude;
+            else if ( gradientMagnitude <= magMax && gradientMagnitude > magMin )
+                weak.at<float> ( x, y ) = gradientMagnitude;
+            else
+                suppress.at<float> ( x, y ) = gradientMagnitude;
+            }
+        }
+    imshow ( "strong", strong );
+    imshow ( "weak", weak );
+    imshow ( "suppress", suppress );
 
-    // Step 3: Non-maximum Suppression
-    nonMaxSuppressed = nonMaximumSuppression(gradient, direction);
-    nonMaxSuppressed.convertTo(nonMaxSuppressed, CV_8U);
-    cv::imshow("nonMaxSuppressed", nonMaxSuppressed);
+    // apply hysteresis
+    for ( int x = 0; x < weak.rows; x++ ) {
+        for ( int y = 0; y < weak.cols; y++ ) {
+            if ( weak.at<float> ( x, y ) != 0 ) {
+                if ( x + 1 < strong.rows && strong.at<float> ( x + 1, y ) != 0 ||
+                        x - 1 >= 0 && strong.at<float> ( x - 1, y ) != 0 ||
+                        y + 1 < strong.cols && strong.at<float> ( x, y + 1 ) != 0 ||
+                        y - 1 >= 0 && strong.at<float> ( x, y - 1 ) != 0 ||
+                        x - 1 >= 0 && y - 1 >= 0 && strong.at<float> ( x - 1, y - 1 ) != 0 ||
+                        x + 1 < strong.rows && y - 1 >= 0 && strong.at<float> ( x + 1, y - 1 ) != 0 ||
+                        x - 1 >= 0 && y + 1 < strong.cols && strong.at<float> ( x - 1, y + 1 ) != 0 ||
+                        x + 1 < strong.rows && y + 1 < strong.cols && strong.at<float> ( x + 1, y + 1 ) != 0 ) {
+                    strong.at<float> ( x, y ) = weak.at<float> ( x, y );
+                    }
+                }
+            }
+        }
 
-    // Step 4: Double Threshold and Edge Tracking by Hysteresis
-    cannyEdges = doubleThresholdHysteresis(nonMaxSuppressed, lowThreshold, highThreshold);
-    // cv::imshow("cannyEdges", cannyEdges);
+    imshow ( "final edge detection", strong );
 
-    // Convert results to displayable format
-    cannyEdges.convertTo(cannyEdges, CV_8U);
-    cv::imshow("cannyEdges", cannyEdges);
-
-    return cannyEdges;
-}
-
-int main(int argc, char** argv){
-    cout << "------------------------------------------------" << std::endl;
-    cout << "OpenCL Exercise 4: Volume Rendering" << std::endl;
-    cout << "------------------------------------------------" << std::endl;
-    // Initialize GLUT
-    // glutInit(&argc, argv);
-    // glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
-    //
-    // // Create a window with GLUT
-    // glutInitWindowSize(800, 600); // Specify your desired window size
-    // glutCreateWindow("Canny Edge Detection");
-    //
-    // // Initialize GLEW
-    // GLenum glewInitResult = glewInit();
-    // if (GLEW_OK != glewInitResult) {
-    //     cerr << "ERROR: " << glewGetErrorString(glewInitResult) << endl;
-    //     return EXIT_FAILURE;
-    // }
-    // Initialize OpenCL
-    // vector<cl::Platform> platforms;
-    // cl::Platform::get(&platforms);
-    // auto platform = platforms.front();
-    // vector<cl::Device> devices;
-    // platform.getDevices(CL_DEVICE_TYPE_GPU, &devices);
-    // auto device = devices.front();
-    //
-    // auto context = cl::Context(device);
-    // auto queue = cl::CommandQueue(context, device);
-    //
-    // // Assume `kernelCode` contains your OpenCL kernel code as a string
-    // string kernelCode =
-    //     "__kernel void gaussianBlur(__global uchar* inputImage, __global uchar* outputImage) {"
-    //     "   // Kernel code here"
-    //     "}";
-    //
-    // // Build kernel
-    // cl::Program::Sources sources;
-    // sources.push_back({kernelCode.c_str(), kernelCode.length()});
-    //
-    // cl::Program program(context, sources);
-    // auto err = program.build("-cl-std=CL1.2");
-
-    // Load image using OpenCV
-    cv::Mat img = cv::imread("../test1.png", cv::IMREAD_GRAYSCALE);
-    if (img.empty()) {
-        cerr << "Failed to load image\n";
-        return -1;
-    }
-    cv::imshow("Original", img);
-    double gaussianSigma = 1.4;
-    int kernelSize = 3;
-    double lowThreshold = 0.05;
-    double highThreshold = 0.15;
-
-    cv::Mat cannyEdges = performCannyEdgeDetection(img, gaussianSigma, kernelSize, lowThreshold, highThreshold);
-
-    // cv::namedWindow("Canny Edges", cv::WINDOW_AUTOSIZE);
-    // cv::imshow("Original", img);
-    cv::imshow("Canny Edges", cannyEdges);
-    cv::waitKey(0); // Wait for a keystroke in the window
-
-    // // Allocate memory on the device
-    // size_t imageBytes = image.total() * image.elemSize();
-    // auto d_input = cl::Buffer(context, CL_MEM_READ_ONLY, imageBytes);
-    // auto d_output = cl::Buffer(context, CL_MEM_WRITE_ONLY, imageBytes);
-    //
-    // // Copy data to GPU
-    // queue.enqueueWriteBuffer(d_input, CL_TRUE, 0, imageBytes, image.data);
-    //
-    // // Set kernel arguments and enqueue kernel for execution
-    // auto kernel = cl::Kernel(program, "gaussianBlur");
-    // kernel.setArg(0, d_input);
-    // kernel.setArg(1, d_output);
-    //
-    // queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(image.cols, image.rows));
-    // queue.finish();
-    //
-    // // Read back the result
-    // cv::Mat outputImage(image.rows, image.cols, CV_8UC1);
-    // queue.enqueueReadBuffer(d_output, CL_TRUE, 0, imageBytes, outputImage.data);
-
-    // Set up GLUT callbacks
-    // glutDisplayFunc(displayGL); // Make sure displayGL is prepared to show the processed image
-    // glutKeyboardFunc(keyboardGL);
-    //
-    // // Enter the GLUT main loop
-    // glutMainLoop();
+    waitKey ( 0 );
     return 0;
-}
-
-
-//////////////////////////////////////////////////////////////////////////////
-// OpenGL callbacks
-//////////////////////////////////////////////////////////////////////////////
-void displayGL() {
-    // Clear the window and draw the processed image
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    // Code to setup and draw texture from the Canny result, if displaying images with OpenGL
-    glutSwapBuffers();
-}
-
-void keyboardGL(unsigned char key, int x, int y) {
-  (void)x;
-  (void)y;
-
-  switch (key) {
-    case 'Q':
-    case 'q':
-    case '\033':  // escape
-      glutLeaveMainLoop();
-      break;
-    default:
-      break;
-  }
-}
+    }

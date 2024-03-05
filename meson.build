@@ -16,7 +16,7 @@ opencv_dep = dependency('opencv4', required: true)
 
 executable('CannyEdgeDetection',
     [
-        'src/main.cpp',
+        'src/canny.cpp',
         xxd.process('src/canny.cl'),
     ],
     extra_files: [
