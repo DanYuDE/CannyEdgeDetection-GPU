@@ -140,24 +140,28 @@ int main ( int argc, char* argv[] ) {
 
     // imshow ( "img", img );
     Core::TimeSpan cpuStart = Core::getCurrentTime();
-    cpuFunction ( img );
+    cpuFunction ( blurred );
     Core::TimeSpan cpuEnd = Core::getCurrentTime();
 
+    cl::size_t<3> origin;
+    origin[0] = 0;
+    origin[1] = 0;
+    origin[2] = 0;
+    cl::size_t<3> region;
+    region[0] = countX;
+    region[1] = countY;
+    region[2] = 1;
 
     // GPU ----------------------------------------------------
     memset ( h_outputGpu.data(), 255, size );
-    queue.enqueueWriteBuffer ( d_output, true, 0, size, h_outputGpu.data() );
+    queue.enqueueWriteImage ( d_output, true, origin, region,
+                              countX * sizeof ( float ), 0, h_outputGpu.data() );
 
     cl::Event copy1;
     cl::Image2D image;
     image = cl::Image2D ( context, CL_MEM_READ_ONLY,
                           cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
-    cl::size_t<3> origin;
-    origin[0] = origin[1] = origin[2] = 0;
-    cl::size_t<3> region;
-    region[0] = countX;
-    region[1] = countY;
-    region[2] = 1;
+
     queue.enqueueWriteImage ( image, true, origin, region,
                               countX * sizeof ( float ), 0, imgVector.data(), NULL,
                               &copy1 );
@@ -168,8 +172,9 @@ int main ( int argc, char* argv[] ) {
     string kernel3 = "Hysteresis";
 
     cl::Kernel nmsKernel(program, kernel1.c_str());
-    cl::Kernel dtKernel(Program, kernel2.c_str());
-    cl::Kernel hKernel(Program, kernel3.c_str());
+    cl::Kernel dtKernel(program, kernel2.c_str());
+    cl::Kernel hKernel(program, kernel3.c_str());
+
 
     cl::Image2D bufferNMStoDT; // Output of the NonMaximumSuppression kernel and input to the DoubleThresholding
     cl::Image2D bufferDTtoH; // Output of the DoubleThresholding kernel and input to the Hysteresis
@@ -203,7 +208,8 @@ int main ( int argc, char* argv[] ) {
 
     // Copy output data back to host
     cl::Event copy2;
-    queue.enqueueReadImage(d_output, true, 0, size, h_outputGpu.data(), NULL, &copy2);
+    queue.enqueueReadImage(d_output, true, origin, region,
+                              countX * sizeof ( float ), 0, h_outputGpu.data(), NULL, &copy2);
 
     // --------------------------------------------------------
 
@@ -334,7 +340,7 @@ Mat Hysteresis ( Mat& strong, const Mat& weak ) {
     return strong;
     }
 
-int cpuFunction ( const Mat& src ) {
+int cpuFunction ( const Mat& blurred ) {
     // Apply Gaussian filter
     // Mat blurred = GaussianFilter ( src );
     // imshow ( "blurred", blurred );
