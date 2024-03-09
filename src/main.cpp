@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <cstddef>
 
 // OpenCV header
 #include <opencv2/opencv.hpp>
@@ -33,6 +34,7 @@
 
 using namespace std;
 using namespace cv;
+using namespace cl;
 
 bool runCpu = true;
 bool runGpu = true;
@@ -51,7 +53,7 @@ Mat Hysteresis ( Mat& strong, const Mat& weak );
 int main ( int argc, char* argv[] ) {
 
     cout << "Beginning of the project!" << endl;
-
+    
     // GPU setup ------------------------------------------
     // Create Context
     cl::Context context ( CL_DEVICE_TYPE_GPU );
@@ -60,7 +62,7 @@ int main ( int argc, char* argv[] ) {
     cout << "Using device " << deviceNr << " / "
          << context.getInfo<CL_CONTEXT_DEVICES>().size() << std::endl;
     ASSERT ( deviceNr > 0 );
-    ASSERT ( ( size_t ) deviceNr <= context.getInfo<CL_CONTEXT_DEVICES>().size() );
+    ASSERT ( ( std::size_t ) deviceNr <= context.getInfo<CL_CONTEXT_DEVICES>().size() );
     cl::Device device = context.getInfo<CL_CONTEXT_DEVICES>() [deviceNr - 1];
     std::vector<cl::Device> devices;
     devices.push_back ( device );
@@ -126,8 +128,8 @@ int main ( int argc, char* argv[] ) {
     imgVector.assign ( ( float* ) blurred.datastart, ( float* ) blurred.dataend );
     cout << rows << " " << cols << endl;
 
-    for ( size_t j = 0; j < countY; j++ ) {
-        for ( size_t i = 0; i < countX; i++ ) {
+    for ( std::size_t j = 0; j < countY; j++ ) {
+        for ( std::size_t i = 0; i < countX; i++ ) {
             h_input[i + countX * j] = imgVector[ ( i % cols ) + cols * ( j % rows )];
             }
         }
@@ -167,26 +169,34 @@ int main ( int argc, char* argv[] ) {
                               &copy1 );
 
     // Create a kernel object
+    string kernel0 = "Sobel";
     string kernelPolar = "cartToPolar";
     string kernel1 = "NonMaximumSuppression";
     string kernel2 = "DoubleThresholding";
     string kernel3 = "Hysteresis";
 
+
+    cl::Kernel sblKernel(program, kernel0.c_str());
     cl::Kernel cpKernel(program, kernelPolar.c_str());
     cl::Kernel nmsKernel(program, kernel1.c_str());
     cl::Kernel dtKernel(program, kernel2.c_str());
     cl::Kernel hKernel(program, kernel3.c_str());
 
 
-
-
+    cl::Image2D bufferSBLtoNMS; //Output for NMS
     cl::Image2D bufferNMStoDT; // Output of the NonMaximumSuppression kernel and input to the DoubleThresholding
+
     cl::Image2D bufferDT_strong_toH; // Output of the DoubleThresholding kernel -- strong, and input to the Hysteresis
      cl::Image2D bufferDT_weak_toH; // Output of the DoubleThresholding kernel -- weak, and input to the Hysteresis
     // Launch kernel on the device
-    cl::Event eventNMS, eventDT, eventH;
+    cl::Event eventSBL, eventNMS, eventDT, eventH;
+
+    // set SBL kernel arguments
+    sblKernel.setArg<cl::Image2D>(0, blurred);
+    sblKernel.setArg<cl::Image2D>(1, bufferSBLtoNMS);
+
     // Set kernel arguments
-    nmsKernel.setArg<cl::Image2D>(0, image);
+    nmsKernel.setArg<cl::Image2D>(0, blurred);
     nmsKernel.setArg<cl::Image2D>(1, bufferNMStoDT); // Output used as input for the next kernel
 
     float magMax = 0.2f;
@@ -200,6 +210,13 @@ int main ( int argc, char* argv[] ) {
     hKernel.setArg<cl::Image2D>(0, bufferDT_strong_toH);
     hKernel.setArg<cl::Image2D>(0, bufferDT_weak_toH);
     hKernel.setArg<cl::Image2D>(0, d_output); // Output from the previous kernel
+
+    queue.enqueueNDRangeKernel(sblKernel, cl::NullRange,
+                               cl::NDRange(countX, countY),
+                               cl::NDRange(wgSizeX, wgSizeY), NULL, &eventNMS);
+    eventNMS.wait();
+
+    cout<<"Hey buddy it worked";
 
     queue.enqueueNDRangeKernel(nmsKernel, cl::NullRange,
                                cl::NDRange(countX, countY),
