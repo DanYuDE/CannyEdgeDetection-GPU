@@ -32,3 +32,6 @@ Additional meson arguments=
 Build Directory Path=/zhome/yuanlu/gpulab/CannyEdgeDetection/build
 Meson Generator Backend=ninja
 Meson executable=/usr/bin/meson
+
+[Project]
+VersionControlSupport=kdevgit
