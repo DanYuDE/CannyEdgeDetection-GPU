@@ -167,13 +167,17 @@ int main ( int argc, char* argv[] ) {
                               &copy1 );
 
     // Create a kernel object
+    string kernelPolar = "cartToPolar";
     string kernel1 = "NonMaximumSuppression";
     string kernel2 = "DoubleThresholding";
     string kernel3 = "Hysteresis";
 
+    cl::Kernel cpKernel(program, kernelPolar.c_str());
     cl::Kernel nmsKernel(program, kernel1.c_str());
     cl::Kernel dtKernel(program, kernel2.c_str());
     cl::Kernel hKernel(program, kernel3.c_str());
+
+
 
 
     cl::Image2D bufferNMStoDT; // Output of the NonMaximumSuppression kernel and input to the DoubleThresholding
