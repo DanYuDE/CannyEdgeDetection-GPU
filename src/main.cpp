@@ -170,19 +170,24 @@ int main ( int argc, char* argv[] ) {
 
     // Create a kernel object
     string kernel0 = "Sobel";
+    string kernelPolar = "cartToPolar";
     string kernel1 = "NonMaximumSuppression";
     string kernel2 = "DoubleThresholding";
     string kernel3 = "Hysteresis";
 
+
     cl::Kernel sblKernel(program, kernel0.c_str());
+    cl::Kernel cpKernel(program, kernelPolar.c_str());
     cl::Kernel nmsKernel(program, kernel1.c_str());
     cl::Kernel dtKernel(program, kernel2.c_str());
     cl::Kernel hKernel(program, kernel3.c_str());
 
+
     cl::Image2D bufferSBLtoNMS; //Output for NMS
     cl::Image2D bufferNMStoDT; // Output of the NonMaximumSuppression kernel and input to the DoubleThresholding
-    cl::Image2D bufferDTtoH; // Output of the DoubleThresholding kernel and input to the Hysteresis
 
+    cl::Image2D bufferDT_strong_toH; // Output of the DoubleThresholding kernel -- strong, and input to the Hysteresis
+     cl::Image2D bufferDT_weak_toH; // Output of the DoubleThresholding kernel -- weak, and input to the Hysteresis
     // Launch kernel on the device
     cl::Event eventSBL, eventNMS, eventDT, eventH;
 
@@ -194,9 +199,16 @@ int main ( int argc, char* argv[] ) {
     nmsKernel.setArg<cl::Image2D>(0, blurred);
     nmsKernel.setArg<cl::Image2D>(1, bufferNMStoDT); // Output used as input for the next kernel
 
+    float magMax = 0.2f;
+    float magMin = 0.1f;
     dtKernel.setArg<cl::Image2D>(0, bufferNMStoDT); // Output from the previous kernel
-    dtKernel.setArg<cl::Image2D>(1, bufferDTtoH); // Output used as input for the next kernel
+    dtKernel.setArg<cl::Image2D>(1, bufferDT_strong_toH); // Output strong used as input for the next kernel
+    dtKernel.setArg<cl::Image2D>(2, bufferDT_weak_toH); // Output weak used as input for the next kernel
+    dtKernel.setArg<cl_float>(3, magMax);
+    dtKernel.setArg<cl_float>(4, magMin);
 
+    hKernel.setArg<cl::Image2D>(0, bufferDT_strong_toH);
+    hKernel.setArg<cl::Image2D>(0, bufferDT_weak_toH);
     hKernel.setArg<cl::Image2D>(0, d_output); // Output from the previous kernel
 
     queue.enqueueNDRangeKernel(sblKernel, cl::NullRange,
@@ -252,11 +264,11 @@ int main ( int argc, char* argv[] ) {
     }
 
 
-Mat GaussianFilter ( const Mat& src ) {
-    Mat blurred;
-    blur ( src, blurred, Size ( 3,3 ) );
-    return blurred;
-    }
+// Mat GaussianFilter ( const Mat& src ) {
+//     Mat blurred;
+//     blur ( src, blurred, Size ( 3,3 ) );
+//     return blurred;
+//     }
 
 Mat NonMaximumSuppression ( const Mat& magnitude, const Mat& blurred, const Mat& angle ) {
     Mat result = magnitude.clone();
