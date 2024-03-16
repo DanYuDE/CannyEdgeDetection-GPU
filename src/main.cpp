@@ -207,6 +207,7 @@ int main ( int argc, char* argv[] ) {
 
     cl::Image2D bufferDT_strong_toH ( context, CL_MEM_READ_WRITE, format, countX, countY ); // Output of the DoubleThresholding kernel -- strong, and input to the Hysteresis
     cl::Image2D bufferDT_weak_toH ( context, CL_MEM_READ_WRITE, format, countX, countY ); // Output of the DoubleThresholding kernel -- weak, and input to the Hysteresis
+
     // Launch kernel on the device
     cl::Event eventSBL, eventNMS, eventDT, eventH;
 
@@ -491,3 +492,66 @@ cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& ma
     return image;
     }
 
+void displayImage(const cv::Mat& image, const std::string& windowName) {
+    cv::imshow(windowName, image);
+    cv::waitKey(0); // Wait indefinitely until a key is pressed
+    cv::destroyAllWindows(); // Close all OpenCV windows after a key press
+}
+
+void chooseStageToDisplay(const cv::Mat* OgPtr,
+                          const cv::Mat* sblPtr,
+                          const cv::Mat* NMSPtr,
+                          const cv::Mat* DTPtr,
+                          const cv::Mat* hPtr) {
+        
+    
+    std::cout << "Choose the stage to display:" << std::endl;
+    std::cout << "\n1. Original Image" << std::endl;
+    std::cout << "\n2. Sobel" << std::endl;
+    std::cout << "\n3. NonMaximumSuppression" << std::endl;
+    std::cout << "\n4. DoubleThresholding" << std::endl;
+    std::cout << "\n5. Final Image" << std::endl;
+    std::cout << "\nEnter stage number:" << std::endl;
+    // Get user input
+    int choice;
+    std::cin >> choice;
+
+    // Display the corresponding stage based on user choice
+    switch (choice) {
+        case 1:
+            //get the original image
+            displayImage(*OgPtr, "Original Image");
+            chooseStageToDisplay();
+            break;
+        case 2:
+            //get Sobel Image
+            displayImage(*sblPtr, "Sobel");
+            std::cout << "\n-----------------------------------------------" << std::endl;
+            std::cout << "\nChoose next stage to display" << std::endl;
+            std::cout << "\n-----------------------------------------------" << std::endl;
+            chooseStageToDisplay();
+            break;
+        case 3:
+            displayImage(*NMSPtr, "NonMaximumSuppression");
+            std::cout << "\n-----------------------------------------------" << std::endl;
+            std::cout << "\nChoose next stage to display" << std::endl;
+            std::cout << "\n-----------------------------------------------" << std::endl;
+            chooseStageToDisplay();
+            break;
+        case 4:
+            displayImage(*DTPtr, "DoubleThresholding");
+            std::cout << "\n-----------------------------------------------" << std::endl;
+            std::cout << "\nChoose next stage to display" << std::endl;
+            std::cout << "\n-----------------------------------------------" << std::endl;
+            chooseStageToDisplay();
+            break;
+        case 5:
+            displayImage(*hPtr, "Final Image");
+            return;
+        default:
+            std::cout << "Invalid choice. Please choose again." << std::endl;
+            chooseStageToDisplay();
+            break;
+    }
+    return;
+}

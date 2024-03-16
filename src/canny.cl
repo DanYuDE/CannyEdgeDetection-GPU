@@ -39,70 +39,9 @@ __kernel void Sobel(__read_only image2d_t blurred,
 
   // Write the gradient magnitude to the Sobel output image
   write_imagef(bufferSBLtoNMS, (int2)(i, j), (float4)(gradientMagnitude, 0.0f, 0.0f, 0.0f));
+
 }
 
-// __kernel void cartToPolar(__global const float* x,
-//                           __global const float* y,
-//                           __global float* magnitude,
-//                           __global float* angle,
-//                           const int angleInDegrees) {
-//     int idx = get_global_id(0);
-//     float x_val = x[idx];
-//     float y_val = y[idx];
-
-//     // Calculate magnitude
-//     magnitude[idx] = hypot(x_val, y_val); // hypot is part of OpenCL's built-in functions
-
-//     // Calculate angle
-//     float ang = atan2(y_val, x_val); // atan2 is also a built-in function in OpenCL
-
-//     if (angleInDegrees) {
-//         ang = ang * (180.0f / M_PI); // Convert radians to degrees
-//     }
-
-//     angle[idx] = ang;
-// }
-
-// __kernel void NonMaximumSuppression(__read_only image2d_t blurred,__read_only image2d_t magnitude,
-//         __read_only image2d_t angle,
-//         __write_only image2d_t bufferNMStoDT){
-
-//         int2 pos = (int2)(get_global_id(0), get_global_id(1));
-
-//         const float pi = 3.14159265358979323846f;
-//         const float angleStep = pi / 8.0f;
-
-//         // Sample magnitudes and angles at the current position
-//         float magCenter = read_imagef(magnitude, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST, pos).x;
-//         float angleCenter = read_imagef(angle, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST, pos).x;
-
-//         // Determine angle bin based on the angle
-//         int angleBin = (int)((angleCenter + pi) / angleStep) % 8;
-
-//         // Neighboring positions based on the angle
-//         int2 pos1, pos2;
-//         switch (angleBin) {
-//             case 0:  pos1 = (int2)(-1, 0); pos2 = (int2)(1, 0); break;
-//             case 1:  pos1 = (int2)(-1, -1); pos2 = (int2)(1, 1); break;
-//             case 2:  pos1 = (int2)(0, -1); pos2 = (int2)(0, 1); break;
-//             case 3:  pos1 = (int2)(-1, 1); pos2 = (int2)(1, -1); break;
-//             case 4:  pos1 = (int2)(-1, 0); pos2 = (int2)(1, 0); break;
-//             case 5:  pos1 = (int2)(-1, -1); pos2 = (int2)(1, 1); break;
-//             case 6:  pos1 = (int2)(0, -1); pos2 = (int2)(0, 1); break;
-//             case 7:  pos1 = (int2)(-1, 1); pos2 = (int2)(1, -1); break;
-//         }
-
-//         // Sample magnitudes at neighboring positions
-//         float mag1 = read_imagef(magnitude, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST, pos + pos1).x;
-//         float mag2 = read_imagef(magnitude, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST, pos + pos2).x;
-
-//         // Perform NMS
-//         float nmsValue = (magCenter >= mag1 && magCenter >= mag2) ? magCenter : 0.0f;
-
-//         // Write NMS result to output
-//         write_imagef(bufferNMStoDT, pos, (float4)(nmsValue, 0.0f, 0.0f, 0.0f));
-
-// }
 
 __kernel void NonMaximumSuppression(__read_only image2d_t blurred,
                                     __write_only image2d_t bufferNMStoDT) {
