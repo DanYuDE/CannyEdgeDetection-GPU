@@ -42,15 +42,15 @@ bool runGpu = true;
 bool displayGpu = true;
 bool writeImages = false;
 
-// change here
+string selectImage();
 
 int cpuFunction ( const Mat& src );
 Mat GaussianFilter ( const Mat& src );
 Mat NonMaximumSuppression ( const Mat& magnitude, const Mat& blurred, const Mat& angle );
 void DoubleThresholding ( const Mat& magnitude, Mat& strong, Mat& weak );
 Mat Hysteresis ( Mat& strong, const Mat& weak );
-cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& mat, bool readOnly );
-void chooseStageToDisplay ( const cv::Mat* OgPtr, const cv::Mat* sblPtr, const cv::Mat* NMSPtr, const cv::Mat* DTSPtr, const cv::Mat* DTWPtr, const cv::Mat* FinalPtr );
+cl::Image2D createImage2DFromMat ( const cl::Context& context, const Mat& mat, bool readOnly );
+void chooseStageToDisplay ( const Mat* GPtr, const Mat* BlPtr, const Mat* sblPtr, const Mat* NMSPtr, const Mat* DTSPtr, const Mat* DTWPtr, const Mat* FinalPtr );
 
 int main ( int argc, char* argv[] ) {
     cout << "Beginning of the project!" << endl;
@@ -94,33 +94,24 @@ int main ( int argc, char* argv[] ) {
     std::size_t countY = wgSizeY * 30;
     //countX *= 3; countY *= 3;
     std::size_t count = countX * countY;       // Overall number of elements
-    std::size_t size = count * sizeof ( float ); // Size of data in bytes
+    // std::size_t size = count * sizeof ( float ); // Size of data in bytes
 
     // Allocate space for output data from CPU and GPU on the host
-    std::vector<float> h_input ( count );
-    std::vector<float> h_outputCpu ( count );
-    std::vector<float> h_outputGpu ( count );
-
-    // vector<float> h_intermediate_sbl (count);
-    // vector<float> h_intermediate_nms (count);
-    // vector<float> h_intermediate_strong (count);
-    // vector<float> h_intermediate_weak (count);
+    // std::vector<float> h_input ( count ); // not used
+    // std::vector<float> h_outputCpu ( count ); // not used
+    Mat h_outputGpu ( countY, countX, CV_32F );
 
 
     // Allocate space for output data on the device
-    // cl::Buffer d_input ( context, CL_MEM_READ_WRITE, size );
     cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
                            cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
     // ----------------------------------------------------
-    // bool finished = false;
-    // load image
-    string imgName;
-    if ( argc > 1 )
-        imgName = argv[1];
-    else
-        imgName = "test1.png";
-
-    string imgPath = "../" + imgName;
+    string imgName = selectImage();
+    string imgPath = "../img/" + imgName;
+    if (imgPath.empty()) {
+        cerr << "No image selected. Exiting program." << endl;
+        return 1;
+    }
 
     Mat img = imread ( imgPath, IMREAD_GRAYSCALE );
     // imshow ( "original", img );
@@ -136,19 +127,19 @@ int main ( int argc, char* argv[] ) {
     imgVector.assign ( ( float* ) blurred.datastart, ( float* ) blurred.dataend );
     cout << rows << " " << cols << endl;
 
-    for ( std::size_t j = 0; j < countY; j++ ) {
-        for ( std::size_t i = 0; i < countX; i++ ) {
-            h_input[i + countX * j] = imgVector[ ( i % cols ) + cols * ( j % rows )];
-            }
-        }
+    // for ( std::size_t j = 0; j < countY; j++ ) {
+    //     for ( std::size_t i = 0; i < countX; i++ ) {
+    //         h_input[i + countX * j] = imgVector[ ( i % cols ) + cols * ( j % rows )];
+    //         }
+    //     }
     // for ( size_t k = 0; k < h_input.size(); k++ )
     //     cout << h_input[k] << " ";
+
     if ( blurred.empty() ) {
         std::cout << imgName + " is not a valid image." << std::endl;
         return 0;
         }
 
-    // imshow ( "img", img );
     Core::TimeSpan cpuStart = Core::getCurrentTime();
     cpuFunction ( blurred );
     Core::TimeSpan cpuEnd = Core::getCurrentTime();
@@ -170,9 +161,9 @@ int main ( int argc, char* argv[] ) {
     region[2] = 1;
 
     // GPU ----------------------------------------------------
-    memset ( h_outputGpu.data(), 255, size );
+    // memset ( h_outputGpu.data(), 255, size );
     queue.enqueueWriteImage ( d_output, true, origin, region,
-                              countX * sizeof ( float ), 0, h_outputGpu.data() );
+                              countX * sizeof ( float ), 0, h_outputGpu.data );
 
     cl::Event copy1;
     cl::Image2D image;
@@ -242,7 +233,7 @@ int main ( int argc, char* argv[] ) {
                              countX * sizeof ( float ), 0, h_intermediate_sbl.data, NULL );
     double minVal, maxVal;
     cv::minMaxLoc ( h_intermediate_sbl, &minVal, &maxVal );
-    std::cout << "Sobel Min: " << minVal << ", Max: " << maxVal << std::endl;
+    // std::cout << "Sobel Min: " << minVal << ", Max: " << maxVal << std::endl;
     cv::Mat displayImg0;
     cv::normalize ( h_intermediate_sbl, displayImg0, 0, 255, cv::NORM_MINMAX );
     displayImg0.convertTo ( displayImg0, CV_8U );
@@ -262,7 +253,7 @@ int main ( int argc, char* argv[] ) {
                              countX * sizeof ( float ), 0, h_intermediate_nms.data, NULL );
     double minVal1, maxVal1;
     cv::minMaxLoc ( h_intermediate_nms, &minVal1, &maxVal1 );
-    std::cout << "NMS Min: " << minVal1 << ", Max: " << maxVal1 << std::endl;
+    // std::cout << "NMS Min: " << minVal1 << ", Max: " << maxVal1 << std::endl;
     cv::Mat displayImg1;
     cv::normalize ( h_intermediate_nms, displayImg1, 0, 255, cv::NORM_MINMAX );
     displayImg1.convertTo ( displayImg1, CV_8U );
@@ -282,7 +273,7 @@ int main ( int argc, char* argv[] ) {
                              countX * sizeof ( float ), 0, h_intermediate_strong.data, NULL );
     double minVal2, maxVal2;
     cv::minMaxLoc ( h_intermediate_strong, &minVal2, &maxVal2 );
-    std::cout << "strong Min: " << minVal2 << ", Max: " << maxVal2 << std::endl;
+    // std::cout << "strong Min: " << minVal2 << ", Max: " << maxVal2 << std::endl;
     cv::Mat displayImg2;
     cv::normalize ( h_intermediate_strong, displayImg2, 0, 255, cv::NORM_MINMAX );
     displayImg2.convertTo ( displayImg2, CV_8U );
@@ -296,7 +287,7 @@ int main ( int argc, char* argv[] ) {
                              countX * sizeof ( float ), 0, h_intermediate_weak.data, NULL );
     double minVal3, maxVal3;
     cv::minMaxLoc ( h_intermediate_weak, &minVal3, &maxVal3 );
-    std::cout << "weak Min: " << minVal3 << ", Max: " << maxVal3 << std::endl;
+    // std::cout << "weak Min: " << minVal3 << ", Max: " << maxVal3 << std::endl;
     cv::Mat displayImg3;
     cv::normalize ( h_intermediate_weak, displayImg3, 0, 255, cv::NORM_MINMAX );
     displayImg3.convertTo ( displayImg3, CV_8U );
@@ -315,15 +306,15 @@ int main ( int argc, char* argv[] ) {
     // Copy output data back to host
     cl::Event copy2;
     queue.enqueueReadImage ( d_output, true, origin, region,
-                             countX * sizeof ( float ), 0, h_outputGpu.data(), NULL, &copy2 );
+                             countX * sizeof ( float ), 0, h_outputGpu.data, NULL, &copy2 );
     double minVal4, maxVal4;
     cv::minMaxLoc ( h_outputGpu, &minVal4, &maxVal4 );
-    std::cout << "output Min: " << minVal4 << ", Max: " << maxVal4 << std::endl;
+    // std::cout << "output Min: " << minVal4 << ", Max: " << maxVal4 << std::endl;
     cv::Mat displayImg4;
     cv::normalize ( h_outputGpu, displayImg4, 0, 255, cv::NORM_MINMAX );
     displayImg4.convertTo ( displayImg4, CV_8U );
-    cv::imshow ( "Final", displayImg4 );
-    cv::waitKey ( 0 ); // Wait for a key press
+    // cv::imshow ( "Final GPU", displayImg4 );
+    // cv::waitKey ( 0 ); // Wait for a key press
     // --------------------------------------------------------
 
     // Print performance data
@@ -346,10 +337,42 @@ int main ( int argc, char* argv[] ) {
          << ( count / overallGpuTime.getSeconds() / 1e6 ) << " MPixel/s)"
          << endl;
 
-    chooseStageToDisplay( &img, &displayImg0, &displayImg1, &displayImg2, &displayImg3, &displayImg4);
+    chooseStageToDisplay( &img, &blurred, &displayImg0, &displayImg1, &displayImg2, &displayImg3, &displayImg4);
     return 0;
     }
 
+
+// Function to select an image
+std::string selectImage() {
+    char imgChoice;
+    string imgName;
+
+    do {
+        cout << "Images: " << endl;
+        cout << "1. test1.png" << endl;
+        cout << "2. lena.png" << endl;
+        cout << "3. nebula.png" << endl;
+        cout << "q to exit" << endl;
+        cout << "Please select the image: " << endl;
+        cin >> imgChoice;
+
+        switch (imgChoice) {
+            case '1':
+                return "test1.png";
+            case '2':
+                return "lena.png";
+            case '3':
+                return "nebula.png";
+            case 'q':
+                return "";
+            default:
+                cout << "Invalid choice. Please choose again." << endl;
+                break; // The loop will continue due to the condition.
+        }
+    } while (imgChoice != 'q');
+
+    return ""; // In case 'q' is entered.
+}
 
 Mat NonMaximumSuppression ( const Mat& magnitude, const Mat& blurred, const Mat& angle ) {
     Mat result = magnitude.clone();
@@ -450,9 +473,6 @@ Mat Hysteresis ( Mat& strong, const Mat& weak ) {
     }
 
 int cpuFunction ( const Mat& blurred ) {
-    // Apply Gaussian filter
-    // Mat blurred = GaussianFilter ( src );
-    // imshow ( "blurred", blurred );
 
     // Compute image gradient
     Mat xComponent, yComponent;
@@ -481,13 +501,13 @@ int cpuFunction ( const Mat& blurred ) {
     // Apply hysteresis
     Mat finalEdges = Hysteresis ( strong, weak );
     // imshow ( "final edge detection", finalEdges );
-
     // waitKey ( 0 );
+
     return 0;
     }
 
 // Function to create cl::Image2D from cv::Mat
-cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& mat, bool readOnly ) {
+cl::Image2D createImage2DFromMat ( const cl::Context& context, const Mat& mat, bool readOnly ) {
     cl_int err;
     cl::ImageFormat format;
 
@@ -508,64 +528,65 @@ cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& ma
     return image;
     }
 
-void displayImage(const std::string& windowName, const cv::Mat& image) {
-    cv::imshow(windowName, image);
-    cv::waitKey(0); // Wait indefinitely until a key is pressed
-    // cv::destroyAllWindows(); // Close all OpenCV windows after a key press
+void displayImage(const string& windowName, const Mat& image) {
+    imshow(windowName, image);
+    waitKey(3000);
+    destroyWindow(windowName); // Close the specific window
 }
 
-void chooseStageToDisplay(const cv::Mat* OgPtr,
-                          const cv::Mat* sblPtr,
-                          const cv::Mat* NMSPtr,
-                          const cv::Mat* DTSPtr,
-                          const cv::Mat* DTWPtr,
-                          const cv::Mat* FinalPtr) {
+void chooseStageToDisplay(const Mat* GPtr,
+                          const Mat* BlPtr,
+                          const Mat* sblPtr,
+                          const Mat* NMSPtr,
+                          const Mat* DTSPtr,
+                          const Mat* DTWPtr,
+                          const Mat* FinalPtr) {
 
     cout << "------------------------------------" << endl;
     cout << "* Choose the stage to display:     *" << endl;
-    cout << "* 1. Original Image                *" << endl;
-    cout << "* 2. Sobel                         *" << endl;
-    cout << "* 3. Non-Maximum Suppression       *" << endl;
-    cout << "* 4. Double Thresholding - Strong  *" << endl;
-    cout << "* 5. Double Thresholding - Weak    *" << endl;
-    cout << "* 6. Final Image                   *" << endl;
+    cout << "* 1. Gray Image                    *" << endl;
+    cout << "* 2. Blurred                       *" << endl;
+    cout << "* 3. Sobel                         *" << endl;
+    cout << "* 4. Non-Maximum Suppression       *" << endl;
+    cout << "* 5. Double Thresholding - Strong  *" << endl;
+    cout << "* 6. Double Thresholding - Weak    *" << endl;
+    cout << "* 7. Final Image                   *" << endl;
     cout << "* q. Quit                          *" << endl;
     cout << "------------------------------------" << endl;
+    cout << endl << "The image will be closed automatically every 3 seconds!" << endl << endl;
 
     char choice;
     do {
         cout << "Enter stage number (or 'q' to quit): ";
         cin >> choice;
 
-        if (!strchr("123456q", choice)) {
+        if (!strchr("1234567q", choice)) {
             cout << "Invalid choice. Please choose again." << endl;
-            continue;
-        }
-
-            cv::destroyAllWindows(); // Close previous windows
-
+        } else{
             switch (choice) {
                 case '1':
-                    displayImage("Original Image", *OgPtr);
+                    displayImage("Gray Image", *GPtr);
                     break;
                 case '2':
-                    displayImage("Sobel", *sblPtr);
+                    displayImage("Blurred", *BlPtr);
                     break;
                 case '3':
-                    displayImage("NonMaximumSuppression", *NMSPtr);
+                    displayImage("Sobel", *sblPtr);
                     break;
                 case '4':
-                    displayImage("DoubleThresholding-Strong", *DTSPtr);
+                    displayImage("NonMaximumSuppression", *NMSPtr);
                     break;
                 case '5':
-                    displayImage("DoubleThresholding-Weak", *DTWPtr);
+                    displayImage("DoubleThresholding-Strong", *DTSPtr);
                     break;
                 case '6':
+                    displayImage("DoubleThresholding-Weak", *DTWPtr);
+                    break;
+                case '7':
                     displayImage("Final Image", *FinalPtr);
                     break;
-
+            }
         }
     } while (choice != 'q');
-    cv::destroyAllWindows(); // Close previous windows
 }
 

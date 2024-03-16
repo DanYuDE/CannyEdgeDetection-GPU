@@ -99,70 +99,58 @@ __kernel void NonMaximumSuppression(__read_only image2d_t blurred,
 
 
 __kernel void DoubleThresholding(
-    read_only image2d_t magnitudeImg, // Input magnitude image
-    write_only image2d_t strongImg,   // Output image for strong edges
-    write_only image2d_t weakImg,     // Output image for weak edges
-    const float magMax,               // Upper threshold value
-    const float magMin                // Lower threshold value
+    read_only image2d_t magnitudeImg,
+    write_only image2d_t strongImg,
+    write_only image2d_t weakImg,
+    const float magMax,
+    const float magMin
 ){
-    int2 pos = (int2)(get_global_id(0), get_global_id(1)); // Current position
-
-    // Sampler for reading the magnitude image
-    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | // Use unnormalized coordinates
-                              CLK_ADDRESS_CLAMP_TO_EDGE |    // Clamp to edge addressing mode
-                              CLK_FILTER_NEAREST;            // Nearest filtering
+    int2 pos = (int2)(get_global_id(0), get_global_id(1));
+    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE |
+                              CLK_ADDRESS_CLAMP_TO_EDGE |
+                              CLK_FILTER_NEAREST;
 
     float gradientMagnitude = read_imagef(magnitudeImg, sampler, pos).x;
 
-    // Initial strong and weak values
     float strongVal = 0.0f, weakVal = 0.0f;
-
-    // Apply double thresholding
     if (gradientMagnitude > magMax) {
-        strongVal = gradientMagnitude;
+        strongVal = 1.0f; // Strong edge
     } else if (gradientMagnitude > magMin) {
-        weakVal = gradientMagnitude;
+        weakVal = 1.0f; // Weak edge (candidate for hysteresis)
     }
 
-    // Write results to the output images
     write_imagef(strongImg, pos, (float4)(strongVal, 0, 0, 0));
     write_imagef(weakImg, pos, (float4)(weakVal, 0, 0, 0));
 }
 
 __kernel void Hysteresis(
-    __read_only image2d_t strongImg,  // Input image for strong edges
-    __read_only image2d_t weakImg,    // Input image for weak edges
-    __write_only image2d_t outputImg  // Output image
-) {
+    read_only image2d_t strongImg,
+    read_only image2d_t weakImg,
+    write_only image2d_t outputImg
+){
     int x = get_global_id(0);
     int y = get_global_id(1);
-    const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
+    const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE |
+                          CLK_ADDRESS_CLAMP |
+                          CLK_FILTER_NEAREST;
 
     float strong = read_imagef(strongImg, smp, (int2)(x, y)).x;
-    float output = strong; // Default to the strong value
+    float weak = read_imagef(weakImg, smp, (int2)(x, y)).x;
+    float output = strong; // Start with strong edges
 
-//     if (strong == 0.0f) { // If not already a strong edge
-//         float weak = read_imagef(weakImg, smp, (int2)(x, y)).x;
-//         if (weak != 0.0f) {
-//             // Check 8 neighbors to see if any is a strong edge
-//             bool isNearStrong = false;
-//             for (int dx = -1; dx <= 1; dx++) {
-//                 for (int dy = -1; dy <= 1; dy++) {
-//                     if (dx == 0 && dy == 0) continue; // Skip self
-//                     float neighborStrong = read_imagef(strongImg, smp, (int2)(x + dx, y + dy)).x;
-//                     if (neighborStrong != 0.0f) {
-//                         isNearStrong = true;
-//                         break;
-//                     }
-//                 }
-//                 if (isNearStrong) break;
-//             }
-//             if (isNearStrong) {
-//                 output = weak; // Promote weak edge to strong
-//             }
-//         }
-//     }
-
-    // Write the result
+    if (strong == 0.0f && weak != 0.0f) {
+        // Examine the 8 neighbors
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                if (dx == 0 && dy == 0) continue; // Skip the center pixel
+                float neighborStrong = read_imagef(strongImg, smp, (int2)(x + dx, y + dy)).x;
+                if (neighborStrong != 0.0f) {
+                    output = 1.0f; // Promote to strong edge
+                    break;
+                }
+            }
+        }
+    }
     write_imagef(outputImg, (int2)(x, y), (float4)(output, 0, 0, 0));
 }
+
