@@ -50,10 +50,9 @@ Mat NonMaximumSuppression ( const Mat& magnitude, const Mat& blurred, const Mat&
 void DoubleThresholding ( const Mat& magnitude, Mat& strong, Mat& weak );
 Mat Hysteresis ( Mat& strong, const Mat& weak );
 cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& mat, bool readOnly );
-
+void chooseStageToDisplay(const cv::Mat* OgPtr, const cv::Mat* sblPtr, const cv::Mat* NMSPtr, const cv::Mat* DTPtr, const cv::Mat* hPtr);
 
 int main ( int argc, char* argv[] ) {
-
     cout << "Beginning of the project!" << endl;
 
     // GPU setup ------------------------------------------
@@ -113,7 +112,7 @@ int main ( int argc, char* argv[] ) {
     cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
                            cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
     // ----------------------------------------------------
-
+    bool finished = false;
     // load image
     string imgName;
     if ( argc > 1 )
@@ -124,14 +123,13 @@ int main ( int argc, char* argv[] ) {
     string imgPath = "../" + imgName;
 
     Mat img = imread ( imgPath, IMREAD_GRAYSCALE );
+    imshow("original", img);
     // Ensure the image is of type CV_32F
     if ( img.type() != CV_32F ) {
-        img.convertTo ( img, CV_32F );
+        img.convertTo(img, CV_32F, 1/255.0);
         }
-    imshow("Convert Img", img);
     Mat blurred;
     blur ( img, blurred, Size ( 3,3 ) );
-
     int rows = blurred.rows;
     int cols = blurred.cols;
     std::vector<float> imgVector;
@@ -521,7 +519,6 @@ void chooseStageToDisplay(const cv::Mat* OgPtr,
         case 1:
             //get the original image
             displayImage(*OgPtr, "Original Image");
-            chooseStageToDisplay();
             break;
         case 2:
             //get Sobel Image
@@ -529,28 +526,24 @@ void chooseStageToDisplay(const cv::Mat* OgPtr,
             std::cout << "\n-----------------------------------------------" << std::endl;
             std::cout << "\nChoose next stage to display" << std::endl;
             std::cout << "\n-----------------------------------------------" << std::endl;
-            chooseStageToDisplay();
             break;
         case 3:
             displayImage(*NMSPtr, "NonMaximumSuppression");
             std::cout << "\n-----------------------------------------------" << std::endl;
             std::cout << "\nChoose next stage to display" << std::endl;
             std::cout << "\n-----------------------------------------------" << std::endl;
-            chooseStageToDisplay();
             break;
         case 4:
             displayImage(*DTPtr, "DoubleThresholding");
             std::cout << "\n-----------------------------------------------" << std::endl;
             std::cout << "\nChoose next stage to display" << std::endl;
             std::cout << "\n-----------------------------------------------" << std::endl;
-            chooseStageToDisplay();
             break;
         case 5:
             displayImage(*hPtr, "Final Image");
             return;
         default:
             std::cout << "Invalid choice. Please choose again." << std::endl;
-            chooseStageToDisplay();
             break;
     }
     return;
