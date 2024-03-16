@@ -48,7 +48,7 @@ Mat GaussianFilter ( const Mat& src );
 Mat NonMaximumSuppression ( const Mat& magnitude, const Mat& blurred, const Mat& angle );
 void DoubleThresholding ( const Mat& magnitude, Mat& strong, Mat& weak );
 Mat Hysteresis ( Mat& strong, const Mat& weak );
-
+cl::Image2D createImage2DFromMat(const cl::Context& context, const cv::Mat& mat, bool readOnly);
 
 int main ( int argc, char* argv[] ) {
 
@@ -73,11 +73,11 @@ int main ( int argc, char* argv[] ) {
 
 
     // Load the source code
-    extern unsigned char CannyEdgeDetection_cl[];
-    extern unsigned int CannyEdgeDetection_cl_len;
+    extern unsigned char canny_cl[];
+    extern unsigned int canny_cl_len;
     cl::Program program ( context,
-                          std::string ( ( const char* ) CannyEdgeDetection_cl,
-                                        CannyEdgeDetection_cl_len ) );
+                          std::string ( ( const char* ) canny_cl,
+                                        canny_cl_len ) );
 
     OpenCL::buildProgram ( program, devices );
 
@@ -145,6 +145,8 @@ int main ( int argc, char* argv[] ) {
     cpuFunction ( blurred );
     Core::TimeSpan cpuEnd = Core::getCurrentTime();
 
+    cl::Image2D image2D = createImage2DFromMat(context, blurred, true);
+
     cl::size_t<3> origin;
     origin[0] = 0;
     origin[1] = 0;
@@ -192,7 +194,7 @@ int main ( int argc, char* argv[] ) {
     cl::Event eventSBL, eventNMS, eventDT, eventH;
 
     // set SBL kernel arguments
-    sblKernel.setArg<cl::Image2D>(0, blurred);
+    sblKernel.setArg<cl::Image2D>(0, image2D);
     sblKernel.setArg<cl::Image2D>(1, bufferSBLtoNMS);
 
     //set cpkernel arguments
@@ -411,3 +413,25 @@ int cpuFunction ( const Mat& blurred ) {
     waitKey ( 0 );
     return 0;
     }
+
+// Function to create cl::Image2D from cv::Mat
+cl::Image2D createImage2DFromMat(const cl::Context& context, const cv::Mat& mat, bool readOnly) {
+    cl_int err;
+    cl::ImageFormat format;
+
+    // Example format - adjust based on your cv::Mat type
+    format = cl::ImageFormat(CL_RGBA, CL_UNSIGNED_INT8);
+
+    // Ensure mat data is continuous and in a suitable format
+    cv::Mat continuousMat = mat.clone(); // Simplified; consider adjusting format as needed
+
+    cl_mem_flags flags = readOnly ? CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR : CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR;
+
+    // Create cl::Image2D
+    cl::Image2D image(context, flags, format, mat.cols, mat.rows, 0, continuousMat.data, &err);
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("Failed to create cl::Image2D from cv::Mat");
+    }
+
+    return image;
+}

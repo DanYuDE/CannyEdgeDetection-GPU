@@ -2,17 +2,19 @@
 #include "../lib/OpenCL/OpenCLKernel.hpp"  // Hack to make syntax highlighting work
 #endif
 
-int getIndexGlobal(size_t countX, int i, int j) { return j * countX + i; }
-// Read value from global array a, return 0 if outside image
-float getValueGlobal(__global const float* a, size_t countX, size_t countY,
-                     int i, int j) {
-  if (i < 0 || i >= countX || j < 0 || j >= countY)
-    return 0;
-  else
-    return a[getIndexGlobal(countX, i, j)];
+inline float getValueImage(__read_only image2d_t image, int x, int y) {
+    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | // Non-normalized coordinates
+                              CLK_ADDRESS_CLAMP |            // Clamp to edge
+                              CLK_FILTER_NEAREST;           // Nearest neighbor interpolation
+
+    int2 coords = (int2)(x, y); // Create a 2D integer vector for coordinates
+    float4 pixel = read_imagef(image, sampler, coords); // Read the pixel value
+    return pixel.x; // Return the first channel assuming image format is single channel float
 }
 
-__kernel void sobelKernel4(__read_only image2d_t blurred,
+int getIndexGlobal(size_t countX, int i, int j) { return j * countX + i; }
+
+__kernel void Sobel(__read_only image2d_t blurred,
                            __global float* bufferSBLtoNMS) {
   int i = get_global_id(0);
   int j = get_global_id(1);
@@ -128,7 +130,7 @@ __kernel void DoubleThresholding(
     write_imagef(weakImg, pos, (float4)(weakVal, 0, 0, 0));
 }
 
-__kernel void hysteresis(
+__kernel void Hysteresis(
     __read_only image2d_t strongImg,  // Input image for strong edges
     __read_only image2d_t weakImg,    // Input image for weak edges
     __write_only image2d_t outputImg  // Output image
