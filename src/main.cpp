@@ -172,14 +172,14 @@ int main ( int argc, char* argv[] ) {
 
     // Create a kernel object
     string kernel0 = "Sobel";
-    string kernelPolar = "cartToPolar";
+   // string kernelPolar = "cartToPolar";
     string kernel1 = "NonMaximumSuppression";
     string kernel2 = "DoubleThresholding";
     string kernel3 = "Hysteresis";
 
 
     cl::Kernel sblKernel(program, kernel0.c_str());
-    cl::Kernel cpKernel(program, kernelPolar.c_str());
+   // cl::Kernel cpKernel(program, kernelPolar.c_str());
     cl::Kernel nmsKernel(program, kernel1.c_str());
     cl::Kernel dtKernel(program, kernel2.c_str());
     cl::Kernel hKernel(program, kernel3.c_str());
@@ -198,16 +198,16 @@ int main ( int argc, char* argv[] ) {
     sblKernel.setArg<cl::Image2D>(1, bufferSBLtoNMS);
 
     //set cpkernel arguments
-    cpkernel.setArg<cl::Buffer>(0, x);
-    cpkernel.setArg<cl::Buffer>(1, y);
-    cpkernel.setArg<cl::Buffer>(2, *magnitude);
-    cpkernel.setArg<cl::Buffer>(3, *angle);
+    // cpKernel.setArg<cl::Buffer>(0, x);
+    // cpKernel.setArg<cl::Buffer>(1, y);
+    // cpKernel.setArg<cl::Buffer>(2, *magnitude);
+    // cpKernel.setArg<cl::Buffer>(3, *angle);
 
     // Set kernel arguments
-    nmsKernel.setArg<cl::Image2D>(0, blurred);
-    nmsKernel.setArg<cl::Buffer>(1, *angle);
-    nmsKernel.setArg<cl::Buffer>(2, *magnitude);
-    nmsKernel.setArg<cl::Image2D>(3, bufferNMStoDT); // Output used as input for the next kernel
+    nmsKernel.setArg<cl::Image2D>(0, image2D);
+   // nmsKernel.setArg<cl::Buffer>(1, *angle);
+   // nmsKernel.setArg<cl::Buffer>(2, *magnitude);
+    nmsKernel.setArg<cl::Image2D>(1, bufferNMStoDT); // Output used as input for the next kernel
 
     float magMax = 0.2f;
     float magMin = 0.1f;
