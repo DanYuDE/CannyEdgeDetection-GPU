@@ -15,25 +15,41 @@ inline float getValueImage(__read_only image2d_t image, int x, int y) {
 int getIndexGlobal(size_t countX, int i, int j) { return j * countX + i; }
 
 __kernel void Sobel(__read_only image2d_t blurred,
-                           __global float* bufferSBLtoNMS) {
+                           __write_only image2d_t bufferSBLtoNMS) {
   int i = get_global_id(0);
   int j = get_global_id(1);
 
   size_t countX = get_global_size(0);
   size_t countY = get_global_size(1);
 
-  float Gmm = getValueImage(blurred, i - 1, j - 1);
-  float Gm0 = getValueImage(blurred, i - 1, j);
-  float Gmp = getValueImage(blurred, i - 1, j + 1);
-  float Gpm = getValueImage(blurred, i + 1, j - 1);
-  float Gp0 = getValueImage(blurred, i + 1, j);
-  float Gpp = getValueImage(blurred, i + 1, j + 1);
-  float G0m = getValueImage(blurred, i, j - 1);
-  float G0p = getValueImage(blurred, i, j + 1);
+//   float Gmm = getValueImage(blurred, i - 1, j - 1);
+//   float Gm0 = getValueImage(blurred, i - 1, j);
+//   float Gmp = getValueImage(blurred, i - 1, j + 1);
+//   float Gpm = getValueImage(blurred, i + 1, j - 1);
+//   float Gp0 = getValueImage(blurred, i + 1, j);
+//   float Gpp = getValueImage(blurred, i + 1, j + 1);
+//   float G0m = getValueImage(blurred, i, j - 1);
+//   float G0p = getValueImage(blurred, i, j + 1);
 
-  float Gx = Gmm + 2 * Gm0 + Gmp - Gpm - 2 * Gp0 - Gpp;
-  float Gy = Gmm + 2 * G0m + Gpm - Gmp - 2 * G0p - Gpp;
-  bufferSBLtoNMS[getIndexGlobal(countX, i, j)] = sqrt(Gx * Gx + Gy * Gy);
+//   float Gx = Gmm + 2 * Gm0 + Gmp - Gpm - 2 * Gp0 - Gpp;
+//   float Gy = Gmm + 2 * G0m + Gpm - Gmp - 2 * G0p - Gpp;
+//   float magnitude = sqrt(Gx * Gx + Gy * Gy);
+
+ float Gmm = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE, (int2)(i - 1, j - 1)).x;
+    float Gm0 = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE, (int2)(i - 1, j)).x;
+    float Gmp = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE, (int2)(i - 1, j + 1)).x;
+    float Gpm = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE, (int2)(i + 1, j - 1)).x;
+    float Gp0 = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE, (int2)(i + 1, j)).x;
+    float Gpp = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE, (int2)(i + 1, j + 1)).x;
+    float G0m = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE, (int2)(i, j - 1)).x;
+    float G0p = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE, (int2)(i, j + 1)).x;
+
+    float Gx = Gmm + 2 * Gm0 + Gmp - Gpm - 2 * Gp0 - Gpp;
+    float Gy = Gmm + 2 * G0m + Gpm - Gmp - 2 * G0p - Gpp;
+    float magnitude = sqrt(Gx * Gx + Gy * Gy);
+
+  //bufferSBLtoNMS[getIndexGlobal(countX, i, j)] = sqrt(Gx * Gx + Gy * Gy);
+  write_imagef(bufferSBLtoNMS, (int2)(i, j), (float4)(magnitude, 0.0f, 0.0f, 0.0f));
 }
 
 // __kernel void cartToPolar(__global const float* x,

@@ -185,7 +185,7 @@ int main ( int argc, char* argv[] ) {
     cl::Kernel hKernel(program, kernel3.c_str());
 
 
-    cl::Image2D bufferSBLtoNMS; //Output for NMS
+    cl::Image2D bufferSBLtoNMS; //Output for sobel and input to NMS
     cl::Image2D bufferNMStoDT; // Output of the NonMaximumSuppression kernel and input to the DoubleThresholding
 
     cl::Image2D bufferDT_strong_toH; // Output of the DoubleThresholding kernel -- strong, and input to the Hysteresis
@@ -204,7 +204,7 @@ int main ( int argc, char* argv[] ) {
     // cpKernel.setArg<cl::Buffer>(3, *angle);
 
     // Set kernel arguments
-    nmsKernel.setArg<cl::Image2D>(0, image2D);
+    nmsKernel.setArg<cl::Image2D>(0, bufferSBLtoNMS);
    // nmsKernel.setArg<cl::Buffer>(1, *angle);
    // nmsKernel.setArg<cl::Buffer>(2, *magnitude);
     nmsKernel.setArg<cl::Image2D>(1, bufferNMStoDT); // Output used as input for the next kernel
