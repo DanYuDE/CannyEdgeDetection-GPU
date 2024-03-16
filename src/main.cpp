@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <cstddef>
+#include <vector>
 
 // OpenCV header
 #include <opencv2/opencv.hpp>
@@ -48,12 +49,13 @@ Mat GaussianFilter ( const Mat& src );
 Mat NonMaximumSuppression ( const Mat& magnitude, const Mat& blurred, const Mat& angle );
 void DoubleThresholding ( const Mat& magnitude, Mat& strong, Mat& weak );
 Mat Hysteresis ( Mat& strong, const Mat& weak );
-cl::Image2D createImage2DFromMat(const cl::Context& context, const cv::Mat& mat, bool readOnly);
+cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& mat, bool readOnly );
+
 
 int main ( int argc, char* argv[] ) {
 
     cout << "Beginning of the project!" << endl;
-    
+
     // GPU setup ------------------------------------------
     // Create Context
     cl::Context context ( CL_DEVICE_TYPE_GPU );
@@ -102,8 +104,8 @@ int main ( int argc, char* argv[] ) {
 
     // Allocate space for input and output data on the device
     cl::Buffer d_input ( context, CL_MEM_READ_WRITE, size );
-    cl::Image2D d_output ( context, CL_MEM_READ_ONLY,
-                          cl::ImageFormat(CL_R, CL_FLOAT), countX, countY );
+    cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
+                           cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
     // ----------------------------------------------------
 
     // load image
@@ -145,7 +147,12 @@ int main ( int argc, char* argv[] ) {
     cpuFunction ( blurred );
     Core::TimeSpan cpuEnd = Core::getCurrentTime();
 
-    cl::Image2D image2D = createImage2DFromMat(context, blurred, true);
+
+    cout << "CPU implementation successfully!" << endl;
+
+    cl::Image2D image2D = createImage2DFromMat ( context, blurred, true );
+
+    cout << "Convert Mat to image2D successfully" << endl;
 
     cl::size_t<3> origin;
     origin[0] = 0;
@@ -163,7 +170,7 @@ int main ( int argc, char* argv[] ) {
 
     cl::Event copy1;
     cl::Image2D image;
-    image = cl::Image2D ( context, CL_MEM_READ_ONLY,
+    image = cl::Image2D ( context, CL_MEM_READ_WRITE,
                           cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
 
     queue.enqueueWriteImage ( image, true, origin, region,
@@ -172,30 +179,29 @@ int main ( int argc, char* argv[] ) {
 
     // Create a kernel object
     string kernel0 = "Sobel";
-   // string kernelPolar = "cartToPolar";
+    // string kernelPolar = "cartToPolar";
     string kernel1 = "NonMaximumSuppression";
     string kernel2 = "DoubleThresholding";
     string kernel3 = "Hysteresis";
 
+    cl::Kernel sblKernel ( program, kernel0.c_str() );
+    // cl::Kernel cpKernel(program, kernelPolar.c_str());
+    cl::Kernel nmsKernel ( program, kernel1.c_str() );
+    cl::Kernel dtKernel ( program, kernel2.c_str() );
+    cl::Kernel hKernel ( program, kernel3.c_str() );
 
-    cl::Kernel sblKernel(program, kernel0.c_str());
-   // cl::Kernel cpKernel(program, kernelPolar.c_str());
-    cl::Kernel nmsKernel(program, kernel1.c_str());
-    cl::Kernel dtKernel(program, kernel2.c_str());
-    cl::Kernel hKernel(program, kernel3.c_str());
+    cl::ImageFormat format ( CL_R, CL_FLOAT );
+    cl::Image2D bufferSBLtoNMS ( context, CL_MEM_READ_WRITE, format, countX, countY ); //Output for NMS
+    cl::Image2D bufferNMStoDT ( context, CL_MEM_READ_WRITE, format, countX, countY ); // Output of the NonMaximumSuppression kernel and input to the DoubleThresholding
 
-
-    cl::Image2D bufferSBLtoNMS; //Output for NMS
-    cl::Image2D bufferNMStoDT; // Output of the NonMaximumSuppression kernel and input to the DoubleThresholding
-
-    cl::Image2D bufferDT_strong_toH; // Output of the DoubleThresholding kernel -- strong, and input to the Hysteresis
-     cl::Image2D bufferDT_weak_toH; // Output of the DoubleThresholding kernel -- weak, and input to the Hysteresis
+    cl::Image2D bufferDT_strong_toH ( context, CL_MEM_READ_WRITE, format, countX, countY ); // Output of the DoubleThresholding kernel -- strong, and input to the Hysteresis
+    cl::Image2D bufferDT_weak_toH ( context, CL_MEM_READ_WRITE, format, countX, countY ); // Output of the DoubleThresholding kernel -- weak, and input to the Hysteresis
     // Launch kernel on the device
     cl::Event eventSBL, eventNMS, eventDT, eventH;
 
     // set SBL kernel arguments
-    sblKernel.setArg<cl::Image2D>(0, image2D);
-    sblKernel.setArg<cl::Image2D>(1, bufferSBLtoNMS);
+    sblKernel.setArg<cl::Image2D> ( 0, image2D );
+    sblKernel.setArg<cl::Image2D> ( 1, bufferSBLtoNMS );
 
     //set cpkernel arguments
     // cpKernel.setArg<cl::Buffer>(0, x);
@@ -204,57 +210,57 @@ int main ( int argc, char* argv[] ) {
     // cpKernel.setArg<cl::Buffer>(3, *angle);
 
     // Set kernel arguments
-    nmsKernel.setArg<cl::Image2D>(0, image2D);
-   // nmsKernel.setArg<cl::Buffer>(1, *angle);
-   // nmsKernel.setArg<cl::Buffer>(2, *magnitude);
-    nmsKernel.setArg<cl::Image2D>(1, bufferNMStoDT); // Output used as input for the next kernel
+    nmsKernel.setArg<cl::Image2D> ( 0, bufferSBLtoNMS );
+    // nmsKernel.setArg<cl::Buffer>(1, *angle);
+    // nmsKernel.setArg<cl::Buffer>(2, *magnitude);
+    nmsKernel.setArg<cl::Image2D> ( 1, bufferNMStoDT ); // Output used as input for the next kernel
 
     float magMax = 0.2f;
     float magMin = 0.1f;
-    dtKernel.setArg<cl::Image2D>(0, bufferNMStoDT); // Output from the previous kernel
-    dtKernel.setArg<cl::Image2D>(1, bufferDT_strong_toH); // Output strong used as input for the next kernel
-    dtKernel.setArg<cl::Image2D>(2, bufferDT_weak_toH); // Output weak used as input for the next kernel
-    dtKernel.setArg<cl_float>(3, magMax);
-    dtKernel.setArg<cl_float>(4, magMin);
+    dtKernel.setArg<cl::Image2D> ( 0, bufferNMStoDT ); // Output from the previous kernel
+    dtKernel.setArg<cl::Image2D> ( 1, bufferDT_strong_toH ); // Output strong used as input for the next kernel
+    dtKernel.setArg<cl::Image2D> ( 2, bufferDT_weak_toH ); // Output weak used as input for the next kernel
+    dtKernel.setArg<cl_float> ( 3, magMax );
+    dtKernel.setArg<cl_float> ( 4, magMin );
 
-    hKernel.setArg<cl::Image2D>(0, bufferDT_strong_toH);
-    hKernel.setArg<cl::Image2D>(0, bufferDT_weak_toH);
-    hKernel.setArg<cl::Image2D>(0, d_output); // Output from the previous kernel
+    hKernel.setArg<cl::Image2D> ( 0, bufferDT_strong_toH );
+    hKernel.setArg<cl::Image2D> ( 1, bufferDT_weak_toH );
+    hKernel.setArg<cl::Image2D> ( 2, d_output ); // Output from the previous kernel
 
-    queue.enqueueNDRangeKernel(sblKernel, cl::NullRange,
-                               cl::NDRange(countX, countY),
-                               cl::NDRange(wgSizeX, wgSizeY), NULL, &eventSBL);
+    queue.enqueueNDRangeKernel ( sblKernel, cl::NullRange,
+                                 cl::NDRange ( countX, countY ),
+                                 cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventSBL );
     eventSBL.wait();
 
-   // cout<<"Hey buddy it worked";
+    // cout<<"Hey buddy it worked";
 
-    queue.enqueueNDRangeKernel(nmsKernel, cl::NullRange,
-                               cl::NDRange(countX, countY),
-                               cl::NDRange(wgSizeX, wgSizeY), NULL, &eventNMS);
+    queue.enqueueNDRangeKernel ( nmsKernel, cl::NullRange,
+                                 cl::NDRange ( countX, countY ),
+                                 cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventNMS );
     eventNMS.wait(); // Wait for the NMS kernel to complete
 
-    queue.enqueueNDRangeKernel(dtKernel, cl::NullRange,
-                               cl::NDRange(countX, countY),
-                               cl::NDRange(wgSizeX, wgSizeY), NULL, &eventDT);
+    queue.enqueueNDRangeKernel ( dtKernel, cl::NullRange,
+                                 cl::NDRange ( countX, countY ),
+                                 cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventDT );
     eventDT.wait(); // Wait for the Double Thresholding kernel to complete
 
-    queue.enqueueNDRangeKernel(hKernel, cl::NullRange,
-                               cl::NDRange(countX, countY),
-                               cl::NDRange(wgSizeX, wgSizeY), NULL, &eventH);
-    eventH.wait(); // Wait for the Hysteresis kernel to complete
+    queue.enqueueNDRangeKernel ( hKernel, cl::NullRange,
+                                 cl::NDRange ( countX, countY ),
+                                 cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventH );
 
+    eventH.wait(); // Wait for the Hysteresis kernel to complete
 
     // Copy output data back to host
     cl::Event copy2;
-    queue.enqueueReadImage(d_output, true, origin, region,
-                              countX * sizeof ( float ), 0, h_outputGpu.data(), NULL, &copy2);
+    queue.enqueueReadImage ( d_output, true, origin, region,
+                             countX * sizeof ( float ), 0, h_outputGpu.data(), NULL, &copy2 );
 
     // --------------------------------------------------------
 
     // Print performance data
     Core::TimeSpan cpuTime = cpuEnd - cpuStart;
-    Core::TimeSpan gpuTime = OpenCL::getElapsedTime(eventNMS) + OpenCL::getElapsedTime(eventDT) + OpenCL::getElapsedTime(eventH);
-    Core::TimeSpan copyTime = OpenCL::getElapsedTime(copy1) + OpenCL::getElapsedTime(copy2);
+    Core::TimeSpan gpuTime = OpenCL::getElapsedTime ( eventNMS ) + OpenCL::getElapsedTime ( eventDT ) + OpenCL::getElapsedTime ( eventH );
+    Core::TimeSpan copyTime = OpenCL::getElapsedTime ( copy1 ) + OpenCL::getElapsedTime ( copy2 );
     Core::TimeSpan overallGpuTime = gpuTime + copyTime;
 
     cout << "CPU Time: " << cpuTime.toString() << ", "
@@ -262,14 +268,14 @@ int main ( int argc, char* argv[] ) {
          << endl;
     cout << "Memory copy Time: " << copyTime.toString() << endl;
     cout << "GPU Time w/o memory copy: " << gpuTime.toString()
-              << " (speedup = " << (cpuTime.getSeconds() / gpuTime.getSeconds())
-              << ", " << (count / gpuTime.getSeconds() / 1e6) << " MPixel/s)"
-              << endl;
+         << " (speedup = " << ( cpuTime.getSeconds() / gpuTime.getSeconds() )
+         << ", " << ( count / gpuTime.getSeconds() / 1e6 ) << " MPixel/s)"
+         << endl;
     cout << "GPU Time with memory copy: " << overallGpuTime.toString()
-              << " (speedup = "
-              << (cpuTime.getSeconds() / overallGpuTime.getSeconds()) << ", "
-              << (count / overallGpuTime.getSeconds() / 1e6) << " MPixel/s)"
-              << endl;
+         << " (speedup = "
+         << ( cpuTime.getSeconds() / overallGpuTime.getSeconds() ) << ", "
+         << ( count / overallGpuTime.getSeconds() / 1e6 ) << " MPixel/s)"
+         << endl;
     return 0;
     }
 
@@ -415,12 +421,12 @@ int cpuFunction ( const Mat& blurred ) {
     }
 
 // Function to create cl::Image2D from cv::Mat
-cl::Image2D createImage2DFromMat(const cl::Context& context, const cv::Mat& mat, bool readOnly) {
+cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& mat, bool readOnly ) {
     cl_int err;
     cl::ImageFormat format;
 
     // Example format - adjust based on your cv::Mat type
-    format = cl::ImageFormat(CL_RGBA, CL_UNSIGNED_INT8);
+    format = cl::ImageFormat ( CL_RGBA, CL_UNSIGNED_INT8 );
 
     // Ensure mat data is continuous and in a suitable format
     cv::Mat continuousMat = mat.clone(); // Simplified; consider adjusting format as needed
@@ -428,10 +434,10 @@ cl::Image2D createImage2DFromMat(const cl::Context& context, const cv::Mat& mat,
     cl_mem_flags flags = readOnly ? CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR : CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR;
 
     // Create cl::Image2D
-    cl::Image2D image(context, flags, format, mat.cols, mat.rows, 0, continuousMat.data, &err);
-    if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create cl::Image2D from cv::Mat");
-    }
+    cl::Image2D image ( context, flags, format, mat.cols, mat.rows, 0, continuousMat.data, &err );
+    if ( err != CL_SUCCESS ) {
+        throw std::runtime_error ( "Failed to create cl::Image2D from cv::Mat" );
+        }
 
     return image;
-}
+    }

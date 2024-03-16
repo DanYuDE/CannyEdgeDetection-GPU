@@ -15,7 +15,7 @@ inline float getValueImage(__read_only image2d_t image, int x, int y) {
 int getIndexGlobal(size_t countX, int i, int j) { return j * countX + i; }
 
 __kernel void Sobel(__read_only image2d_t blurred,
-                           __global float* bufferSBLtoNMS) {
+                           __write_only image2d_t bufferSBLtoNMS) {
   int i = get_global_id(0);
   int j = get_global_id(1);
 
@@ -33,7 +33,11 @@ __kernel void Sobel(__read_only image2d_t blurred,
 
   float Gx = Gmm + 2 * Gm0 + Gmp - Gpm - 2 * Gp0 - Gpp;
   float Gy = Gmm + 2 * G0m + Gpm - Gmp - 2 * G0p - Gpp;
-  bufferSBLtoNMS[getIndexGlobal(countX, i, j)] = sqrt(Gx * Gx + Gy * Gy);
+  float gradientMagnitude = sqrt(Gx * Gx + Gy * Gy);
+
+  // Write the gradient magnitude to the Sobel output image
+  // Note: OpenCL's write_imagef requires the value to be a float4. Here, only the first component is used.
+  write_imagef(bufferSBLtoNMS, (int2)(i, j), (float4)(gradientMagnitude, 0.0f, 0.0f, 0.0f));
 }
 
 // __kernel void cartToPolar(__global const float* x,
@@ -102,12 +106,18 @@ __kernel void Sobel(__read_only image2d_t blurred,
 __kernel void NonMaximumSuppression(__read_only image2d_t blurred,
                                     __write_only image2d_t bufferNMStoDT) {
     int2 pos = (int2)(get_global_id(0), get_global_id(1));
+    // Create a sampler object
+    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | // Non-normalized coordinates
+                              CLK_ADDRESS_CLAMP_TO_EDGE |    // Clamp to edge addressing mode
+                              CLK_FILTER_NEAREST;            // Nearest neighbor interpolation
+
+    // Corrected usage of read_imagef with a sampler
+    float2 gradient = read_imagef(blurred, sampler, pos).xy;
 
     const float pi = 3.14159265358979323846f;
     const float angleStep = pi / 8.0f;
 
     // Sample gradients at the current position
-    float2 gradient = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST, pos).xy;
     float x_val = gradient.x;
     float y_val = gradient.y;
 
@@ -137,8 +147,8 @@ __kernel void NonMaximumSuppression(__read_only image2d_t blurred,
     }
 
     // Sample magnitudes at neighboring positions
-    float mag1 = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST, pos + pos1).x;
-    float mag2 = read_imagef(blurred, CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST, pos + pos2).x;
+    float mag1 = read_imagef(blurred, sampler, pos + pos1).x;
+    float mag2 = read_imagef(blurred, sampler, pos + pos2).x;
 
     // Perform NMS
     float nmsValue = (magCenter >= mag1 && magCenter >= mag2) ? magCenter : 0.0f;
