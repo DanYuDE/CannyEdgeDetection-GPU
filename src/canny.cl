@@ -2,43 +2,43 @@
 #include "../lib/OpenCL/OpenCLKernel.hpp"  // Hack to make syntax highlighting work
 #endif
 
-inline float getValueImage(__read_only image2d_t image, int x, int y) {
+inline float getValueImage(__read_only image2d_t image, int x, int y, const sampler_t sampler) {
+    int2 coords = (int2)(x, y); // Create a 2D integer vector for coordinates
+    float4 pixel = read_imagef(image, sampler, coords); // Read the pixel value using the sampler
+    return pixel.x; // Return the first channel assuming image format is single channel float
+}
+
+__kernel void Sobel(__read_only image2d_t inputImage,
+                           __write_only image2d_t bufferSBLtoNMS) {
+    int x = get_global_id(0);
+    int y = get_global_id(1);
+
     const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | // Non-normalized coordinates
                               CLK_ADDRESS_CLAMP |            // Clamp to edge
                               CLK_FILTER_NEAREST;           // Nearest neighbor interpolation
 
-    int2 coords = (int2)(x, y); // Create a 2D integer vector for coordinates
-    float4 pixel = read_imagef(image, sampler, coords); // Read the pixel value
-    return pixel.x; // Return the first channel assuming image format is single channel float
-}
+    // Sobel filter in X direction (horizontal edges)
+    float Gx = -1 * getValueImage(inputImage, x - 1, y - 1, sampler)
+               -2 * getValueImage(inputImage, x - 1, y, sampler)
+               -1 * getValueImage(inputImage, x - 1, y + 1, sampler)
+               +1 * getValueImage(inputImage, x + 1, y - 1, sampler)
+               +2 * getValueImage(inputImage, x + 1, y, sampler)
+               +1 * getValueImage(inputImage, x + 1, y + 1, sampler);
 
-int getIndexGlobal(size_t countX, int i, int j) { return j * countX + i; }
+    // Sobel filter in Y direction (vertical edges)
+    float Gy = -1 * getValueImage(inputImage, x - 1, y - 1, sampler)
+               -2 * getValueImage(inputImage, x, y - 1, sampler)
+               -1 * getValueImage(inputImage, x + 1, y - 1, sampler)
+               +1 * getValueImage(inputImage, x - 1, y + 1, sampler)
+               +2 * getValueImage(inputImage, x, y + 1, sampler)
+               +1 * getValueImage(inputImage, x + 1, y + 1, sampler);
 
-__kernel void Sobel(__read_only image2d_t blurred,
-                           __write_only image2d_t bufferSBLtoNMS) {
-  int i = get_global_id(0);
-  int j = get_global_id(1);
+    // Compute magnitude and angle (in radians for further processing)
+    float magnitude = hypot(Gx, Gy);
+    float angle = atan2(Gy, Gx);
 
-  const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | // Non-normalized coordinates
-                            CLK_ADDRESS_CLAMP |            // Clamp to edge
-                            CLK_FILTER_NEAREST;           // Nearest neighbor interpolation
-
-  // Ensure we are within the bounds of the image
-  // This check is technically not needed due to CLK_ADDRESS_CLAMP but included for clarity
-  if (i < 0 || j < 0 || i >= get_image_width(blurred) || j >= get_image_height(blurred))
-      return;
-
-  // Calculate the Sobel filter response
-  float Gx = getValueImage(blurred, i-1, j-1) + 2*getValueImage(blurred, i-1, j) + getValueImage(blurred, i-1, j+1) -
-             (getValueImage(blurred, i+1, j-1) + 2*getValueImage(blurred, i+1, j) + getValueImage(blurred, i+1, j+1));
-
-  float Gy = getValueImage(blurred, i-1, j-1) + 2*getValueImage(blurred, i, j-1) + getValueImage(blurred, i+1, j-1) -
-             (getValueImage(blurred, i-1, j+1) + 2*getValueImage(blurred, i, j+1) + getValueImage(blurred, i+1, j+1));
-
-  float gradientMagnitude = sqrt(Gx * Gx + Gy * Gy);
-
-  // Write the gradient magnitude to the Sobel output image
-  write_imagef(bufferSBLtoNMS, (int2)(i, j), (float4)(gradientMagnitude, 0.0f, 0.0f, 0.0f));
+    // Writing out the magnitude to the output image
+    write_imagef(bufferSBLtoNMS, (int2)(x, y), (float4)(magnitude, 0, 0, 0));
 
 }
 
@@ -141,27 +141,27 @@ __kernel void Hysteresis(
     float strong = read_imagef(strongImg, smp, (int2)(x, y)).x;
     float output = strong; // Default to the strong value
 
-    if (strong == 0.0f) { // If not already a strong edge
-        float weak = read_imagef(weakImg, smp, (int2)(x, y)).x;
-        if (weak != 0.0f) {
-            // Check 8 neighbors to see if any is a strong edge
-            bool isNearStrong = false;
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dy = -1; dy <= 1; dy++) {
-                    if (dx == 0 && dy == 0) continue; // Skip self
-                    float neighborStrong = read_imagef(strongImg, smp, (int2)(x + dx, y + dy)).x;
-                    if (neighborStrong != 0.0f) {
-                        isNearStrong = true;
-                        break;
-                    }
-                }
-                if (isNearStrong) break;
-            }
-            if (isNearStrong) {
-                output = weak; // Promote weak edge to strong
-            }
-        }
-    }
+//     if (strong == 0.0f) { // If not already a strong edge
+//         float weak = read_imagef(weakImg, smp, (int2)(x, y)).x;
+//         if (weak != 0.0f) {
+//             // Check 8 neighbors to see if any is a strong edge
+//             bool isNearStrong = false;
+//             for (int dx = -1; dx <= 1; dx++) {
+//                 for (int dy = -1; dy <= 1; dy++) {
+//                     if (dx == 0 && dy == 0) continue; // Skip self
+//                     float neighborStrong = read_imagef(strongImg, smp, (int2)(x + dx, y + dy)).x;
+//                     if (neighborStrong != 0.0f) {
+//                         isNearStrong = true;
+//                         break;
+//                     }
+//                 }
+//                 if (isNearStrong) break;
+//             }
+//             if (isNearStrong) {
+//                 output = weak; // Promote weak edge to strong
+//             }
+//         }
+//     }
 
     // Write the result
     write_imagef(outputImg, (int2)(x, y), (float4)(output, 0, 0, 0));

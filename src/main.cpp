@@ -50,7 +50,7 @@ Mat NonMaximumSuppression ( const Mat& magnitude, const Mat& blurred, const Mat&
 void DoubleThresholding ( const Mat& magnitude, Mat& strong, Mat& weak );
 Mat Hysteresis ( Mat& strong, const Mat& weak );
 cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& mat, bool readOnly );
-void chooseStageToDisplay(const cv::Mat* OgPtr, const cv::Mat* sblPtr, const cv::Mat* NMSPtr, const cv::Mat* DTPtr, const cv::Mat* hPtr);
+void chooseStageToDisplay ( const cv::Mat* OgPtr, const cv::Mat* sblPtr, const cv::Mat* NMSPtr, const cv::Mat* DTSPtr, const cv::Mat* DTWPtr, const cv::Mat* FinalPtr );
 
 int main ( int argc, char* argv[] ) {
     cout << "Beginning of the project!" << endl;
@@ -107,12 +107,12 @@ int main ( int argc, char* argv[] ) {
     // vector<float> h_intermediate_weak (count);
 
 
-    // Allocate space for input and output data on the device
-    cl::Buffer d_input ( context, CL_MEM_READ_WRITE, size );
+    // Allocate space for output data on the device
+    // cl::Buffer d_input ( context, CL_MEM_READ_WRITE, size );
     cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
                            cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
     // ----------------------------------------------------
-    bool finished = false;
+    // bool finished = false;
     // load image
     string imgName;
     if ( argc > 1 )
@@ -123,10 +123,10 @@ int main ( int argc, char* argv[] ) {
     string imgPath = "../" + imgName;
 
     Mat img = imread ( imgPath, IMREAD_GRAYSCALE );
-    imshow("original", img);
+    // imshow ( "original", img );
     // Ensure the image is of type CV_32F
     if ( img.type() != CV_32F ) {
-        img.convertTo(img, CV_32F, 1/255.0);
+        img.convertTo ( img, CV_32F, 1/255.0 );
         }
     Mat blurred;
     blur ( img, blurred, Size ( 3,3 ) );
@@ -183,10 +183,10 @@ int main ( int argc, char* argv[] ) {
                               countX * sizeof ( float ), 0, imgVector.data(), NULL,
                               &copy1 );
 
-    Mat h_intermediate_sbl (countY, countX, CV_32F);
-    Mat h_intermediate_nms (countY, countX, CV_32F);
-    Mat h_intermediate_strong (countY, countX, CV_32F);
-    Mat h_intermediate_weak (countY, countX, CV_32F);
+    Mat h_intermediate_sbl ( countY, countX, CV_32F );
+    Mat h_intermediate_nms ( countY, countX, CV_32F );
+    Mat h_intermediate_strong ( countY, countX, CV_32F );
+    Mat h_intermediate_weak ( countY, countX, CV_32F );
 
     // Create a kernel object
     string kernel0 = "Sobel";
@@ -239,17 +239,17 @@ int main ( int argc, char* argv[] ) {
 
     // store Sobel output image back to host
     queue.enqueueReadImage ( bufferSBLtoNMS, true, origin, region,
-                             countX * sizeof ( float ), 0, h_intermediate_sbl.data, NULL);
+                             countX * sizeof ( float ), 0, h_intermediate_sbl.data, NULL );
     double minVal, maxVal;
-    cv::minMaxLoc(h_intermediate_sbl, &minVal, &maxVal);
+    cv::minMaxLoc ( h_intermediate_sbl, &minVal, &maxVal );
     std::cout << "Sobel Min: " << minVal << ", Max: " << maxVal << std::endl;
-    cv::Mat displayImg;
-    cv::normalize(h_intermediate_sbl, displayImg, 0, 255, cv::NORM_MINMAX);
-    displayImg.convertTo(displayImg, CV_8U);
+    cv::Mat displayImg0;
+    cv::normalize ( h_intermediate_sbl, displayImg0, 0, 255, cv::NORM_MINMAX );
+    displayImg0.convertTo ( displayImg0, CV_8U );
 
-        // Step 3: Display the image using cv::imshow
-    cv::imshow("Sobel Intermediate", displayImg);
-    cv::waitKey(0); // Wait for a key press
+    // Step 3: Display the image using cv::imshow
+    // cv::imshow ( "Sobel Intermediate", displayImg0 );
+    // cv::waitKey ( 0 ); // Wait for a key press
 
     // Non-Maximum Suppression Kernel -------------------------------------------------------
     queue.enqueueNDRangeKernel ( nmsKernel, cl::NullRange,
@@ -259,14 +259,17 @@ int main ( int argc, char* argv[] ) {
 
     // store Non-Maximum Suppression output image back to host
     queue.enqueueReadImage ( bufferNMStoDT, true, origin, region,
-                             countX * sizeof ( float ), 0, h_intermediate_nms.data, NULL);
+                             countX * sizeof ( float ), 0, h_intermediate_nms.data, NULL );
+    double minVal1, maxVal1;
+    cv::minMaxLoc ( h_intermediate_nms, &minVal1, &maxVal1 );
+    std::cout << "NMS Min: " << minVal1 << ", Max: " << maxVal1 << std::endl;
     cv::Mat displayImg1;
-    cv::normalize(h_intermediate_nms, displayImg1, 0, 255, cv::NORM_MINMAX);
-    displayImg1.convertTo(displayImg1, CV_8U);
+    cv::normalize ( h_intermediate_nms, displayImg1, 0, 255, cv::NORM_MINMAX );
+    displayImg1.convertTo ( displayImg1, CV_8U );
 
-        // Step 3: Display the image using cv::imshow
-    cv::imshow("NMS Intermediate", displayImg1);
-    cv::waitKey(0); // Wait for a key press
+    // Step 3: Display the image using cv::imshow
+    // cv::imshow ( "NMS Intermediate", displayImg1 );
+    // cv::waitKey ( 0 ); // Wait for a key press
 
     // Double Thresholding Kernel -----------------------------------------------------------
     queue.enqueueNDRangeKernel ( dtKernel, cl::NullRange,
@@ -276,25 +279,31 @@ int main ( int argc, char* argv[] ) {
 
     // store Strong Image output image back to host
     queue.enqueueReadImage ( bufferDT_strong_toH, true, origin, region,
-                             countX * sizeof ( float ), 0, h_intermediate_strong.data, NULL);
+                             countX * sizeof ( float ), 0, h_intermediate_strong.data, NULL );
+    double minVal2, maxVal2;
+    cv::minMaxLoc ( h_intermediate_strong, &minVal2, &maxVal2 );
+    std::cout << "strong Min: " << minVal2 << ", Max: " << maxVal2 << std::endl;
     cv::Mat displayImg2;
-    cv::normalize(h_intermediate_strong, displayImg2, 0, 255, cv::NORM_MINMAX);
-    displayImg2.convertTo(displayImg2, CV_8U);
+    cv::normalize ( h_intermediate_strong, displayImg2, 0, 255, cv::NORM_MINMAX );
+    displayImg2.convertTo ( displayImg2, CV_8U );
 
-        // Step 3: Display the image using cv::imshow
-    cv::imshow("strong Intermediate", displayImg2);
-    cv::waitKey(0); // Wait for a key press
+    // Step 3: Display the image using cv::imshow
+    // cv::imshow ( "strong Intermediate", displayImg2 );
+    // cv::waitKey ( 0 ); // Wait for a key press
 
     // store Weak Image output image back to host
     queue.enqueueReadImage ( bufferDT_weak_toH, true, origin, region,
-                             countX * sizeof ( float ), 0, h_intermediate_weak.data, NULL);
+                             countX * sizeof ( float ), 0, h_intermediate_weak.data, NULL );
+    double minVal3, maxVal3;
+    cv::minMaxLoc ( h_intermediate_weak, &minVal3, &maxVal3 );
+    std::cout << "weak Min: " << minVal3 << ", Max: " << maxVal3 << std::endl;
     cv::Mat displayImg3;
-    cv::normalize(h_intermediate_weak, displayImg3, 0, 255, cv::NORM_MINMAX);
-    displayImg3.convertTo(displayImg3, CV_8U);
+    cv::normalize ( h_intermediate_weak, displayImg3, 0, 255, cv::NORM_MINMAX );
+    displayImg3.convertTo ( displayImg3, CV_8U );
 
-        // Step 3: Display the image using cv::imshow
-    cv::imshow("Weak Intermediate", displayImg3);
-    cv::waitKey(0); // Wait for a key press
+    // Step 3: Display the image using cv::imshow
+    // cv::imshow ( "Weak Intermediate", displayImg3 );
+    // cv::waitKey ( 0 ); // Wait for a key press
 
     // Hysteresis Kernel --------------------------------------------------------------------
     queue.enqueueNDRangeKernel ( hKernel, cl::NullRange,
@@ -307,7 +316,14 @@ int main ( int argc, char* argv[] ) {
     cl::Event copy2;
     queue.enqueueReadImage ( d_output, true, origin, region,
                              countX * sizeof ( float ), 0, h_outputGpu.data(), NULL, &copy2 );
-
+    double minVal4, maxVal4;
+    cv::minMaxLoc ( h_outputGpu, &minVal4, &maxVal4 );
+    std::cout << "output Min: " << minVal4 << ", Max: " << maxVal4 << std::endl;
+    cv::Mat displayImg4;
+    cv::normalize ( h_outputGpu, displayImg4, 0, 255, cv::NORM_MINMAX );
+    displayImg4.convertTo ( displayImg4, CV_8U );
+    cv::imshow ( "Final", displayImg4 );
+    cv::waitKey ( 0 ); // Wait for a key press
     // --------------------------------------------------------
 
     // Print performance data
@@ -329,6 +345,8 @@ int main ( int argc, char* argv[] ) {
          << ( cpuTime.getSeconds() / overallGpuTime.getSeconds() ) << ", "
          << ( count / overallGpuTime.getSeconds() / 1e6 ) << " MPixel/s)"
          << endl;
+
+    chooseStageToDisplay( &img, &displayImg0, &displayImg1, &displayImg2, &displayImg3, &displayImg4);
     return 0;
     }
 
@@ -448,21 +466,21 @@ int cpuFunction ( const Mat& blurred ) {
     // Normalize values
     normalize ( magnitude, magnitude, 0, 1, NORM_MINMAX );
 
-    imshow("sobel", blurred);
+    // imshow ( "sobel", blurred );
     // Apply non-maximum suppression
     Mat suppressed = NonMaximumSuppression ( magnitude, blurred, angle );
-    imshow ( "non-max suppression", suppressed );
+    // imshow ( "non-max suppression", suppressed );
 
     // Apply double thresholding
     Mat strong = Mat::zeros ( magnitude.rows, magnitude.cols, CV_32F );
     Mat weak = Mat::zeros ( magnitude.rows, magnitude.cols, CV_32F );
     DoubleThresholding ( suppressed, strong, weak );
-    imshow ( "strong", strong );
-    imshow ( "Weak", weak );
+    // imshow ( "strong", strong );
+    // imshow ( "Weak", weak );
 
     // Apply hysteresis
     Mat finalEdges = Hysteresis ( strong, weak );
-    imshow ( "final edge detection", finalEdges );
+    // imshow ( "final edge detection", finalEdges );
 
     // waitKey ( 0 );
     return 0;
@@ -474,7 +492,7 @@ cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& ma
     cl::ImageFormat format;
 
     // Example format - adjust based on your cv::Mat type
-    format = cl::ImageFormat ( CL_RGBA, CL_UNSIGNED_INT8 );
+    format = cl::ImageFormat ( CL_R, CL_FLOAT );
 
     // Ensure mat data is continuous and in a suitable format
     cv::Mat continuousMat = mat.clone(); // Simplified; consider adjusting format as needed
@@ -490,61 +508,64 @@ cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& ma
     return image;
     }
 
-void displayImage(const cv::Mat& image, const std::string& windowName) {
+void displayImage(const std::string& windowName, const cv::Mat& image) {
     cv::imshow(windowName, image);
     cv::waitKey(0); // Wait indefinitely until a key is pressed
-    cv::destroyAllWindows(); // Close all OpenCV windows after a key press
+    // cv::destroyAllWindows(); // Close all OpenCV windows after a key press
 }
 
 void chooseStageToDisplay(const cv::Mat* OgPtr,
                           const cv::Mat* sblPtr,
                           const cv::Mat* NMSPtr,
-                          const cv::Mat* DTPtr,
-                          const cv::Mat* hPtr) {
-        
-    
-    std::cout << "Choose the stage to display:" << std::endl;
-    std::cout << "\n1. Original Image" << std::endl;
-    std::cout << "\n2. Sobel" << std::endl;
-    std::cout << "\n3. NonMaximumSuppression" << std::endl;
-    std::cout << "\n4. DoubleThresholding" << std::endl;
-    std::cout << "\n5. Final Image" << std::endl;
-    std::cout << "\nEnter stage number:" << std::endl;
-    // Get user input
-    int choice;
-    std::cin >> choice;
+                          const cv::Mat* DTSPtr,
+                          const cv::Mat* DTWPtr,
+                          const cv::Mat* FinalPtr) {
 
-    // Display the corresponding stage based on user choice
-    switch (choice) {
-        case 1:
-            //get the original image
-            displayImage(*OgPtr, "Original Image");
-            break;
-        case 2:
-            //get Sobel Image
-            displayImage(*sblPtr, "Sobel");
-            std::cout << "\n-----------------------------------------------" << std::endl;
-            std::cout << "\nChoose next stage to display" << std::endl;
-            std::cout << "\n-----------------------------------------------" << std::endl;
-            break;
-        case 3:
-            displayImage(*NMSPtr, "NonMaximumSuppression");
-            std::cout << "\n-----------------------------------------------" << std::endl;
-            std::cout << "\nChoose next stage to display" << std::endl;
-            std::cout << "\n-----------------------------------------------" << std::endl;
-            break;
-        case 4:
-            displayImage(*DTPtr, "DoubleThresholding");
-            std::cout << "\n-----------------------------------------------" << std::endl;
-            std::cout << "\nChoose next stage to display" << std::endl;
-            std::cout << "\n-----------------------------------------------" << std::endl;
-            break;
-        case 5:
-            displayImage(*hPtr, "Final Image");
-            return;
-        default:
-            std::cout << "Invalid choice. Please choose again." << std::endl;
-            break;
-    }
-    return;
+    cout << "------------------------------------" << endl;
+    cout << "* Choose the stage to display:     *" << endl;
+    cout << "* 1. Original Image                *" << endl;
+    cout << "* 2. Sobel                         *" << endl;
+    cout << "* 3. Non-Maximum Suppression       *" << endl;
+    cout << "* 4. Double Thresholding - Strong  *" << endl;
+    cout << "* 5. Double Thresholding - Weak    *" << endl;
+    cout << "* 6. Final Image                   *" << endl;
+    cout << "* q. Quit                          *" << endl;
+    cout << "------------------------------------" << endl;
+
+    char choice;
+    do {
+        cout << "Enter stage number (or 'q' to quit): ";
+        cin >> choice;
+
+        if (!strchr("123456q", choice)) {
+            cout << "Invalid choice. Please choose again." << endl;
+            continue;
+        }
+
+            cv::destroyAllWindows(); // Close previous windows
+
+            switch (choice) {
+                case '1':
+                    displayImage("Original Image", *OgPtr);
+                    break;
+                case '2':
+                    displayImage("Sobel", *sblPtr);
+                    break;
+                case '3':
+                    displayImage("NonMaximumSuppression", *NMSPtr);
+                    break;
+                case '4':
+                    displayImage("DoubleThresholding-Strong", *DTSPtr);
+                    break;
+                case '5':
+                    displayImage("DoubleThresholding-Weak", *DTWPtr);
+                    break;
+                case '6':
+                    displayImage("Final Image", *FinalPtr);
+                    break;
+
+        }
+    } while (choice != 'q');
+    cv::destroyAllWindows(); // Close previous windows
 }
+
