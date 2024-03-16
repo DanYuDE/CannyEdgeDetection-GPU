@@ -102,6 +102,12 @@ int main ( int argc, char* argv[] ) {
     std::vector<float> h_outputCpu ( count );
     std::vector<float> h_outputGpu ( count );
 
+    // vector<float> h_intermediate_sbl (count);
+    // vector<float> h_intermediate_nms (count);
+    // vector<float> h_intermediate_strong (count);
+    // vector<float> h_intermediate_weak (count);
+
+
     // Allocate space for input and output data on the device
     cl::Buffer d_input ( context, CL_MEM_READ_WRITE, size );
     cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
@@ -122,8 +128,10 @@ int main ( int argc, char* argv[] ) {
     if ( img.type() != CV_32F ) {
         img.convertTo ( img, CV_32F );
         }
+    imshow("Convert Img", img);
     Mat blurred;
     blur ( img, blurred, Size ( 3,3 ) );
+
     int rows = blurred.rows;
     int cols = blurred.cols;
     std::vector<float> imgVector;
@@ -177,15 +185,18 @@ int main ( int argc, char* argv[] ) {
                               countX * sizeof ( float ), 0, imgVector.data(), NULL,
                               &copy1 );
 
+    Mat h_intermediate_sbl (countY, countX, CV_32F);
+    Mat h_intermediate_nms (countY, countX, CV_32F);
+    Mat h_intermediate_strong (countY, countX, CV_32F);
+    Mat h_intermediate_weak (countY, countX, CV_32F);
+
     // Create a kernel object
     string kernel0 = "Sobel";
-    // string kernelPolar = "cartToPolar";
     string kernel1 = "NonMaximumSuppression";
     string kernel2 = "DoubleThresholding";
     string kernel3 = "Hysteresis";
 
     cl::Kernel sblKernel ( program, kernel0.c_str() );
-    // cl::Kernel cpKernel(program, kernelPolar.c_str());
     cl::Kernel nmsKernel ( program, kernel1.c_str() );
     cl::Kernel dtKernel ( program, kernel2.c_str() );
     cl::Kernel hKernel ( program, kernel3.c_str() );
@@ -199,22 +210,15 @@ int main ( int argc, char* argv[] ) {
     // Launch kernel on the device
     cl::Event eventSBL, eventNMS, eventDT, eventH;
 
-    // set SBL kernel arguments
+    // set SBL Kernel arguments
     sblKernel.setArg<cl::Image2D> ( 0, image2D );
     sblKernel.setArg<cl::Image2D> ( 1, bufferSBLtoNMS );
 
-    //set cpkernel arguments
-    // cpKernel.setArg<cl::Buffer>(0, x);
-    // cpKernel.setArg<cl::Buffer>(1, y);
-    // cpKernel.setArg<cl::Buffer>(2, *magnitude);
-    // cpKernel.setArg<cl::Buffer>(3, *angle);
-
-    // Set kernel arguments
+    // Set NMS Kernel arguments
     nmsKernel.setArg<cl::Image2D> ( 0, bufferSBLtoNMS );
-    // nmsKernel.setArg<cl::Buffer>(1, *angle);
-    // nmsKernel.setArg<cl::Buffer>(2, *magnitude);
     nmsKernel.setArg<cl::Image2D> ( 1, bufferNMStoDT ); // Output used as input for the next kernel
 
+    // Set DT Kernel arguments
     float magMax = 0.2f;
     float magMin = 0.1f;
     dtKernel.setArg<cl::Image2D> ( 0, bufferNMStoDT ); // Output from the previous kernel
@@ -223,27 +227,77 @@ int main ( int argc, char* argv[] ) {
     dtKernel.setArg<cl_float> ( 3, magMax );
     dtKernel.setArg<cl_float> ( 4, magMin );
 
+    // Set H Kernel arguments
     hKernel.setArg<cl::Image2D> ( 0, bufferDT_strong_toH );
     hKernel.setArg<cl::Image2D> ( 1, bufferDT_weak_toH );
     hKernel.setArg<cl::Image2D> ( 2, d_output ); // Output from the previous kernel
 
+    // Sobel Kernel ------------------------------------------------------------------------
     queue.enqueueNDRangeKernel ( sblKernel, cl::NullRange,
                                  cl::NDRange ( countX, countY ),
                                  cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventSBL );
     eventSBL.wait();
 
-    // cout<<"Hey buddy it worked";
+    // store Sobel output image back to host
+    queue.enqueueReadImage ( bufferSBLtoNMS, true, origin, region,
+                             countX * sizeof ( float ), 0, h_intermediate_sbl.data, NULL);
+    double minVal, maxVal;
+    cv::minMaxLoc(h_intermediate_sbl, &minVal, &maxVal);
+    std::cout << "Sobel Min: " << minVal << ", Max: " << maxVal << std::endl;
+    cv::Mat displayImg;
+    cv::normalize(h_intermediate_sbl, displayImg, 0, 255, cv::NORM_MINMAX);
+    displayImg.convertTo(displayImg, CV_8U);
 
+        // Step 3: Display the image using cv::imshow
+    cv::imshow("Sobel Intermediate", displayImg);
+    cv::waitKey(0); // Wait for a key press
+
+    // Non-Maximum Suppression Kernel -------------------------------------------------------
     queue.enqueueNDRangeKernel ( nmsKernel, cl::NullRange,
                                  cl::NDRange ( countX, countY ),
                                  cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventNMS );
     eventNMS.wait(); // Wait for the NMS kernel to complete
 
+    // store Non-Maximum Suppression output image back to host
+    queue.enqueueReadImage ( bufferNMStoDT, true, origin, region,
+                             countX * sizeof ( float ), 0, h_intermediate_nms.data, NULL);
+    cv::Mat displayImg1;
+    cv::normalize(h_intermediate_nms, displayImg1, 0, 255, cv::NORM_MINMAX);
+    displayImg1.convertTo(displayImg1, CV_8U);
+
+        // Step 3: Display the image using cv::imshow
+    cv::imshow("NMS Intermediate", displayImg1);
+    cv::waitKey(0); // Wait for a key press
+
+    // Double Thresholding Kernel -----------------------------------------------------------
     queue.enqueueNDRangeKernel ( dtKernel, cl::NullRange,
                                  cl::NDRange ( countX, countY ),
                                  cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventDT );
     eventDT.wait(); // Wait for the Double Thresholding kernel to complete
 
+    // store Strong Image output image back to host
+    queue.enqueueReadImage ( bufferDT_strong_toH, true, origin, region,
+                             countX * sizeof ( float ), 0, h_intermediate_strong.data, NULL);
+    cv::Mat displayImg2;
+    cv::normalize(h_intermediate_strong, displayImg2, 0, 255, cv::NORM_MINMAX);
+    displayImg2.convertTo(displayImg2, CV_8U);
+
+        // Step 3: Display the image using cv::imshow
+    cv::imshow("strong Intermediate", displayImg2);
+    cv::waitKey(0); // Wait for a key press
+
+    // store Weak Image output image back to host
+    queue.enqueueReadImage ( bufferDT_weak_toH, true, origin, region,
+                             countX * sizeof ( float ), 0, h_intermediate_weak.data, NULL);
+    cv::Mat displayImg3;
+    cv::normalize(h_intermediate_weak, displayImg3, 0, 255, cv::NORM_MINMAX);
+    displayImg3.convertTo(displayImg3, CV_8U);
+
+        // Step 3: Display the image using cv::imshow
+    cv::imshow("Weak Intermediate", displayImg3);
+    cv::waitKey(0); // Wait for a key press
+
+    // Hysteresis Kernel --------------------------------------------------------------------
     queue.enqueueNDRangeKernel ( hKernel, cl::NullRange,
                                  cl::NDRange ( countX, countY ),
                                  cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventH );
@@ -279,12 +333,6 @@ int main ( int argc, char* argv[] ) {
     return 0;
     }
 
-
-// Mat GaussianFilter ( const Mat& src ) {
-//     Mat blurred;
-//     blur ( src, blurred, Size ( 3,3 ) );
-//     return blurred;
-//     }
 
 Mat NonMaximumSuppression ( const Mat& magnitude, const Mat& blurred, const Mat& angle ) {
     Mat result = magnitude.clone();
@@ -401,6 +449,7 @@ int cpuFunction ( const Mat& blurred ) {
     // Normalize values
     normalize ( magnitude, magnitude, 0, 1, NORM_MINMAX );
 
+    imshow("sobel", blurred);
     // Apply non-maximum suppression
     Mat suppressed = NonMaximumSuppression ( magnitude, blurred, angle );
     imshow ( "non-max suppression", suppressed );
@@ -416,7 +465,7 @@ int cpuFunction ( const Mat& blurred ) {
     Mat finalEdges = Hysteresis ( strong, weak );
     imshow ( "final edge detection", finalEdges );
 
-    waitKey ( 0 );
+    // waitKey ( 0 );
     return 0;
     }
 
@@ -441,3 +490,4 @@ cl::Image2D createImage2DFromMat ( const cl::Context& context, const cv::Mat& ma
 
     return image;
     }
+

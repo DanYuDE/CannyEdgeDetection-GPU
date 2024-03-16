@@ -19,24 +19,25 @@ __kernel void Sobel(__read_only image2d_t blurred,
   int i = get_global_id(0);
   int j = get_global_id(1);
 
-  size_t countX = get_global_size(0);
-  size_t countY = get_global_size(1);
+  const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | // Non-normalized coordinates
+                            CLK_ADDRESS_CLAMP |            // Clamp to edge
+                            CLK_FILTER_NEAREST;           // Nearest neighbor interpolation
 
-  float Gmm = getValueImage(blurred, i - 1, j - 1);
-  float Gm0 = getValueImage(blurred, i - 1, j);
-  float Gmp = getValueImage(blurred, i - 1, j + 1);
-  float Gpm = getValueImage(blurred, i + 1, j - 1);
-  float Gp0 = getValueImage(blurred, i + 1, j);
-  float Gpp = getValueImage(blurred, i + 1, j + 1);
-  float G0m = getValueImage(blurred, i, j - 1);
-  float G0p = getValueImage(blurred, i, j + 1);
+  // Ensure we are within the bounds of the image
+  // This check is technically not needed due to CLK_ADDRESS_CLAMP but included for clarity
+  if (i < 0 || j < 0 || i >= get_image_width(blurred) || j >= get_image_height(blurred))
+      return;
 
-  float Gx = Gmm + 2 * Gm0 + Gmp - Gpm - 2 * Gp0 - Gpp;
-  float Gy = Gmm + 2 * G0m + Gpm - Gmp - 2 * G0p - Gpp;
+  // Calculate the Sobel filter response
+  float Gx = getValueImage(blurred, i-1, j-1) + 2*getValueImage(blurred, i-1, j) + getValueImage(blurred, i-1, j+1) -
+             (getValueImage(blurred, i+1, j-1) + 2*getValueImage(blurred, i+1, j) + getValueImage(blurred, i+1, j+1));
+
+  float Gy = getValueImage(blurred, i-1, j-1) + 2*getValueImage(blurred, i, j-1) + getValueImage(blurred, i+1, j-1) -
+             (getValueImage(blurred, i-1, j+1) + 2*getValueImage(blurred, i, j+1) + getValueImage(blurred, i+1, j+1));
+
   float gradientMagnitude = sqrt(Gx * Gx + Gy * Gy);
 
   // Write the gradient magnitude to the Sobel output image
-  // Note: OpenCL's write_imagef requires the value to be a float4. Here, only the first component is used.
   write_imagef(bufferSBLtoNMS, (int2)(i, j), (float4)(gradientMagnitude, 0.0f, 0.0f, 0.0f));
 }
 
