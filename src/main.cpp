@@ -195,9 +195,17 @@ int main ( int argc, char* argv[] ) {
     sblKernel.setArg<cl::Image2D>(0, blurred);
     sblKernel.setArg<cl::Image2D>(1, bufferSBLtoNMS);
 
+    //set cpkernel arguments
+    cpkernel.setArg<cl::Buffer>(0, x);
+    cpkernel.setArg<cl::Buffer>(1, y);
+    cpkernel.setArg<cl::Buffer>(2, *magnitude);
+    cpkernel.setArg<cl::Buffer>(3, *angle);
+
     // Set kernel arguments
     nmsKernel.setArg<cl::Image2D>(0, blurred);
-    nmsKernel.setArg<cl::Image2D>(1, bufferNMStoDT); // Output used as input for the next kernel
+    nmsKernel.setArg<cl::Buffer>(1, *angle);
+    nmsKernel.setArg<cl::Buffer>(2, *magnitude);
+    nmsKernel.setArg<cl::Image2D>(3, bufferNMStoDT); // Output used as input for the next kernel
 
     float magMax = 0.2f;
     float magMin = 0.1f;
@@ -213,10 +221,10 @@ int main ( int argc, char* argv[] ) {
 
     queue.enqueueNDRangeKernel(sblKernel, cl::NullRange,
                                cl::NDRange(countX, countY),
-                               cl::NDRange(wgSizeX, wgSizeY), NULL, &eventNMS);
-    eventNMS.wait();
+                               cl::NDRange(wgSizeX, wgSizeY), NULL, &eventSBL);
+    eventSBL.wait();
 
-    cout<<"Hey buddy it worked";
+   // cout<<"Hey buddy it worked";
 
     queue.enqueueNDRangeKernel(nmsKernel, cl::NullRange,
                                cl::NDRange(countX, countY),
