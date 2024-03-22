@@ -8,7 +8,35 @@ inline float getValueImage(__read_only image2d_t image, int x, int y, const samp
     return pixel.x; // Return the first channel assuming image format is single channel float
 }
 
-__kernel void Sobel(__read_only image2d_t inputImage,
+__kernel void GaussianBlur(
+    __read_only image2d_t image,
+    __constant float* mask,
+    __write_only image2d_t blurredImage,
+    __private int maskSize
+) {
+    int x = get_global_id(0);
+    int y = get_global_id(1);
+
+    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE |
+                              CLK_ADDRESS_CLAMP_TO_EDGE |
+                              CLK_FILTER_NEAREST;
+
+    float sum = 0.0f;
+
+    for(int a = -maskSize; a <= maskSize; a++) {
+        for(int b = -maskSize; b <= maskSize; b++) {
+            int2 readPos = (int2)(x + a, y + b);
+            float imageValue = read_imagef(image, sampler, readPos).x;
+            sum += mask[(a + maskSize) + (b + maskSize) * (maskSize * 2 + 1)] * imageValue;
+        }
+    }
+
+    // Write the computed sum to the output image
+    write_imagef(blurredImage, (int2)(x, y), (float4)(sum, 0.0f, 0.0f, 0.0f));
+}
+
+
+__kernel void Sobel(__read_only image2d_t blurredImage,
                            __write_only image2d_t bufferSBLtoNMS) {
     int x = get_global_id(0);
     int y = get_global_id(1);
@@ -18,20 +46,20 @@ __kernel void Sobel(__read_only image2d_t inputImage,
                               CLK_FILTER_NEAREST;           // Nearest neighbor interpolation
 
     // Sobel filter in X direction (horizontal edges)
-    float Gx = -1 * getValueImage(inputImage, x - 1, y - 1, sampler)
-               -2 * getValueImage(inputImage, x - 1, y, sampler)
-               -1 * getValueImage(inputImage, x - 1, y + 1, sampler)
-               +1 * getValueImage(inputImage, x + 1, y - 1, sampler)
-               +2 * getValueImage(inputImage, x + 1, y, sampler)
-               +1 * getValueImage(inputImage, x + 1, y + 1, sampler);
+    float Gx = -1 * getValueImage(blurredImage, x - 1, y - 1, sampler)
+               -2 * getValueImage(blurredImage, x - 1, y, sampler)
+               -1 * getValueImage(blurredImage, x - 1, y + 1, sampler)
+               +1 * getValueImage(blurredImage, x + 1, y - 1, sampler)
+               +2 * getValueImage(blurredImage, x + 1, y, sampler)
+               +1 * getValueImage(blurredImage, x + 1, y + 1, sampler);
 
     // Sobel filter in Y direction (vertical edges)
-    float Gy = -1 * getValueImage(inputImage, x - 1, y - 1, sampler)
-               -2 * getValueImage(inputImage, x, y - 1, sampler)
-               -1 * getValueImage(inputImage, x + 1, y - 1, sampler)
-               +1 * getValueImage(inputImage, x - 1, y + 1, sampler)
-               +2 * getValueImage(inputImage, x, y + 1, sampler)
-               +1 * getValueImage(inputImage, x + 1, y + 1, sampler);
+    float Gy = -1 * getValueImage(blurredImage, x - 1, y - 1, sampler)
+               -2 * getValueImage(blurredImage, x, y - 1, sampler)
+               -1 * getValueImage(blurredImage, x + 1, y - 1, sampler)
+               +1 * getValueImage(blurredImage, x - 1, y + 1, sampler)
+               +2 * getValueImage(blurredImage, x, y + 1, sampler)
+               +1 * getValueImage(blurredImage, x + 1, y + 1, sampler);
 
     // Compute magnitude and angle (in radians for further processing)
     float magnitude = hypot(Gx, Gy);
@@ -43,7 +71,7 @@ __kernel void Sobel(__read_only image2d_t inputImage,
 }
 
 
-__kernel void NonMaximumSuppression(__read_only image2d_t blurred,
+__kernel void NonMaximumSuppression(__read_only image2d_t bufferSBLtoNMS,
                                     __write_only image2d_t bufferNMStoDT) {
     int2 pos = (int2)(get_global_id(0), get_global_id(1));
     // Create a sampler object
@@ -52,7 +80,7 @@ __kernel void NonMaximumSuppression(__read_only image2d_t blurred,
                               CLK_FILTER_NEAREST;            // Nearest neighbor interpolation
 
     // Corrected usage of read_imagef with a sampler
-    float2 gradient = read_imagef(blurred, sampler, pos).xy;
+    float2 gradient = read_imagef(bufferSBLtoNMS, sampler, pos).xy;
 
     const float pi = 3.14159265358979323846f;
     const float angleStep = pi / 8.0f;
@@ -87,8 +115,8 @@ __kernel void NonMaximumSuppression(__read_only image2d_t blurred,
     }
 
     // Sample magnitudes at neighboring positions
-    float mag1 = read_imagef(blurred, sampler, pos + pos1).x;
-    float mag2 = read_imagef(blurred, sampler, pos + pos2).x;
+    float mag1 = read_imagef(bufferSBLtoNMS, sampler, pos + pos1).x;
+    float mag2 = read_imagef(bufferSBLtoNMS, sampler, pos + pos2).x;
 
     // Perform NMS
     float nmsValue = (magCenter >= mag1 && magCenter >= mag2) ? magCenter : 0.0f;

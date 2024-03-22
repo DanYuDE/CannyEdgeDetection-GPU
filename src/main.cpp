@@ -84,29 +84,13 @@ int main ( int argc, char* argv[] ) {
 
     // ----------------------------------------------------
 
-    // Declare some value for GPU -------------------------
-    std::size_t wgSizeX =
-        16;  // Number of work items per work group in X direction
-    std::size_t wgSizeY = 16;
-    std::size_t countX =
-        wgSizeX *
-        40;  // Overall number of work items in X direction = Number of elements in X direction
-    std::size_t countY = wgSizeY * 30;
-    //countX *= 3; countY *= 3;
-    std::size_t count = countX * countY;       // Overall number of elements
-    // std::size_t size = count * sizeof ( float ); // Size of data in bytes
-
     // Allocate space for output data from CPU and GPU on the host
     // std::vector<float> h_input ( count ); // not used
     // std::vector<float> h_outputCpu ( count ); // not used
-    Mat h_outputGpu ( countY, countX, CV_32F );
 
-
-    // Allocate space for output data on the device
-    cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
-                           cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
     // ----------------------------------------------------
     string imgName = selectImage();
+    // string imgName = "lena.png";
     string imgPath = "../img/" + imgName;
     if (imgPath.empty()) {
         cerr << "No image selected. Exiting program." << endl;
@@ -114,18 +98,7 @@ int main ( int argc, char* argv[] ) {
     }
 
     Mat img = imread ( imgPath, IMREAD_GRAYSCALE );
-    // imshow ( "original", img );
-    // Ensure the image is of type CV_32F
-    if ( img.type() != CV_32F ) {
-        img.convertTo ( img, CV_32F, 1/255.0 );
-        }
-    Mat blurred;
-    blur ( img, blurred, Size ( 3,3 ) );
-    int rows = blurred.rows;
-    int cols = blurred.cols;
-    std::vector<float> imgVector;
-    imgVector.assign ( ( float* ) blurred.datastart, ( float* ) blurred.dataend );
-    cout << rows << " " << cols << endl;
+    // imshow ( "Beginning", img );
 
     // for ( std::size_t j = 0; j < countY; j++ ) {
     //     for ( std::size_t i = 0; i < countX; i++ ) {
@@ -135,19 +108,45 @@ int main ( int argc, char* argv[] ) {
     // for ( size_t k = 0; k < h_input.size(); k++ )
     //     cout << h_input[k] << " ";
 
-    if ( blurred.empty() ) {
-        std::cout << imgName + " is not a valid image." << std::endl;
-        return 0;
-        }
 
     Core::TimeSpan cpuStart = Core::getCurrentTime();
-    cpuFunction ( blurred );
+    cpuFunction ( img );
     Core::TimeSpan cpuEnd = Core::getCurrentTime();
-
 
     cout << "CPU implementation successfully!" << endl;
 
-    cl::Image2D image2D = createImage2DFromMat ( context, blurred, true );
+    // For GPU
+    if ( img.type() != CV_32F ) {
+        img.convertTo ( img, CV_32F, 1/255.0 );
+    }
+    std::vector<float> imgVector;
+    imgVector.assign ( ( float* ) img.datastart, ( float* ) img.dataend );
+
+    cl::Image2D image2D = createImage2DFromMat ( context, img, true );
+
+    // Get the maximum work-group size for the device using C++ API
+    std::size_t maxWorkGroupSize;
+    device.getInfo(CL_DEVICE_MAX_WORK_GROUP_SIZE, &maxWorkGroupSize);
+
+    std::size_t baseWgSize = std::sqrt(maxWorkGroupSize); // Calculate a base work-group size
+    std::size_t wgSizeX = std::min(baseWgSize, static_cast<std::size_t>(16)); // Choose a reasonable default or based on experimentation
+    std::size_t wgSizeY = wgSizeX; // Same as wgSizeX for square work groups
+
+    // Obtain image dimensions
+    std::size_t imgWidth = img.cols;
+    std::size_t imgHeight = img.rows;
+
+    // Adjust countX and countY to be multiples of wgSizeX and wgSizeY
+    std::size_t countX = ((imgWidth + wgSizeX - 1) / wgSizeX) * wgSizeX;
+    std::size_t countY = ((imgHeight + wgSizeY - 1) / wgSizeY) * wgSizeY;
+    std::size_t count = countX * countY;       // Overall number of elements
+    // std::size_t size = count * sizeof ( float ); // Size of data in bytes
+    Mat h_outputGpu ( countY, countX, CV_32F );
+
+
+    // Allocate space for output data on the device
+    cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
+                           cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
 
     cout << "Convert Mat to image2D successfully" << endl;
 
@@ -174,23 +173,27 @@ int main ( int argc, char* argv[] ) {
                               countX * sizeof ( float ), 0, imgVector.data(), NULL,
                               &copy1 );
 
+    Mat h_intermediate_blur(countY, countX, CV_32F);
     Mat h_intermediate_sbl ( countY, countX, CV_32F );
     Mat h_intermediate_nms ( countY, countX, CV_32F );
     Mat h_intermediate_strong ( countY, countX, CV_32F );
     Mat h_intermediate_weak ( countY, countX, CV_32F );
 
     // Create a kernel object
+    string kernelblur = "GaussianBlur";
     string kernel0 = "Sobel";
     string kernel1 = "NonMaximumSuppression";
     string kernel2 = "DoubleThresholding";
     string kernel3 = "Hysteresis";
 
+    cl::Kernel gbKernel (program, kernelblur.c_str());
     cl::Kernel sblKernel ( program, kernel0.c_str() );
     cl::Kernel nmsKernel ( program, kernel1.c_str() );
     cl::Kernel dtKernel ( program, kernel2.c_str() );
     cl::Kernel hKernel ( program, kernel3.c_str() );
-
+    cout << "Line 192 " << endl;
     cl::ImageFormat format ( CL_R, CL_FLOAT );
+    cl::Image2D bufferGBtoSBL (context, CL_MEM_READ_WRITE, format, countX, countY);
     cl::Image2D bufferSBLtoNMS ( context, CL_MEM_READ_WRITE, format, countX, countY ); //Output for NMS
     cl::Image2D bufferNMStoDT ( context, CL_MEM_READ_WRITE, format, countX, countY ); // Output of the NonMaximumSuppression kernel and input to the DoubleThresholding
 
@@ -198,12 +201,25 @@ int main ( int argc, char* argv[] ) {
     cl::Image2D bufferDT_weak_toH ( context, CL_MEM_READ_WRITE, format, countX, countY ); // Output of the DoubleThresholding kernel -- weak, and input to the Hysteresis
 
     // Launch kernel on the device
-    cl::Event eventSBL, eventNMS, eventDT, eventH;
+    cl::Event eventGB, eventSBL, eventNMS, eventDT, eventH;
 
+    const float mask[] = {
+        1.0f / 16, 2.0f / 16, 1.0f / 16,
+        2.0f / 16, 4.0f / 16, 2.0f / 16,
+        1.0f / 16, 2.0f / 16, 1.0f / 16
+    };
+    const int maskSize = 1; // For a 3x3 mask, maskSize would be 1.
+    // Create a buffer for the mask on the OpenCL device.
+    cl::Buffer maskBuffer = cl::Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(mask), const_cast<float*>(mask));
+    gbKernel.setArg<cl::Image2D> (0, image2D);
+    gbKernel.setArg<cl::Buffer> (1, maskBuffer);
+    gbKernel.setArg<cl::Image2D> (2, bufferGBtoSBL);
+    gbKernel.setArg<cl_int> (3, maskSize);
+    cout << "Line 216 " << endl;
     // set SBL Kernel arguments
-    sblKernel.setArg<cl::Image2D> ( 0, image2D );
+    sblKernel.setArg<cl::Image2D> ( 0, bufferGBtoSBL );
     sblKernel.setArg<cl::Image2D> ( 1, bufferSBLtoNMS );
-
+    cout << "Line 220 " << endl;
     // Set NMS Kernel arguments
     nmsKernel.setArg<cl::Image2D> ( 0, bufferSBLtoNMS );
     nmsKernel.setArg<cl::Image2D> ( 1, bufferNMStoDT ); // Output used as input for the next kernel
@@ -221,14 +237,27 @@ int main ( int argc, char* argv[] ) {
     hKernel.setArg<cl::Image2D> ( 0, bufferDT_strong_toH );
     hKernel.setArg<cl::Image2D> ( 1, bufferDT_weak_toH );
     hKernel.setArg<cl::Image2D> ( 2, d_output ); // Output from the previous kernel
-
+    cout << "Line 238 " << endl;
+    // Gaussian Blur Kernel ------------------------------------------------
+    queue.enqueueNDRangeKernel ( gbKernel, cl::NullRange,
+                                 cl::NDRange ( countX, countY ),
+                                 cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventGB );
+    eventGB.wait();
+    cout << "Line 244 " << endl;
+    // store Blur output image back to the host
+    queue.enqueueReadImage ( bufferGBtoSBL, true, origin, region,
+                             countX * sizeof ( float ), 0, h_intermediate_blur.data, NULL );
+    cv::Mat displayBlur;
+    cv::normalize(h_intermediate_blur, displayBlur, 0, 255, cv::NORM_MINMAX);
+    displayBlur.convertTo(displayBlur, CV_8U);
+    cout << "Line 251 " << endl;
     // Sobel Kernel ------------------------------------------------------------------------
     queue.enqueueNDRangeKernel ( sblKernel, cl::NullRange,
                                  cl::NDRange ( countX, countY ),
                                  cl::NDRange ( wgSizeX, wgSizeY ), NULL, &eventSBL );
     eventSBL.wait();
 
-    // store Sobel output image back to host
+    // store Sobel output image back to the host
     queue.enqueueReadImage ( bufferSBLtoNMS, true, origin, region,
                              countX * sizeof ( float ), 0, h_intermediate_sbl.data, NULL );
     double minVal, maxVal;
@@ -337,7 +366,7 @@ int main ( int argc, char* argv[] ) {
          << ( count / overallGpuTime.getSeconds() / 1e6 ) << " MPixel/s)"
          << endl;
 
-    chooseStageToDisplay( &img, &blurred, &displayImg0, &displayImg1, &displayImg2, &displayImg3, &displayImg4);
+    chooseStageToDisplay( &img, &displayBlur, &displayImg0, &displayImg1, &displayImg2, &displayImg3, &displayImg4);
     return 0;
     }
 
@@ -348,12 +377,14 @@ std::string selectImage() {
     string imgName;
 
     do {
-        cout << "Images: " << endl;
+        cout << "-------------------------" << endl;
+        cout << "Please select an image: " << endl;
         cout << "1. test1.png" << endl;
         cout << "2. lena.png" << endl;
         cout << "3. nebula.png" << endl;
         cout << "q to exit" << endl;
-        cout << "Please select the image: " << endl;
+        cout << "-------------------------" << endl;
+        cout << "Your selection: ";
         cin >> imgChoice;
 
         switch (imgChoice) {
@@ -464,7 +495,7 @@ Mat Hysteresis ( Mat& strong, const Mat& weak ) {
                         ( x + 1 < strong.rows && y - 1 >= 0 && strong.at<float> ( x + 1, y - 1 ) != 0 ) ||
                         ( x - 1 >= 0 && y + 1 < strong.cols && strong.at<float> ( x - 1, y + 1 ) != 0 ) ||
                         ( x + 1 < strong.rows && y + 1 < strong.cols && strong.at<float> ( x + 1, y + 1 ) != 0 ) ) {
-                    strong.at<float> ( x, y ) = weak.at<float> ( x, y );
+                    strong.at<float> ( x, y ) = strong.at<float> ( x, y );
                     }
                 }
             }
@@ -472,7 +503,16 @@ Mat Hysteresis ( Mat& strong, const Mat& weak ) {
     return strong;
     }
 
-int cpuFunction ( const Mat& blurred ) {
+int cpuFunction ( const Mat& img ) {
+    // imshow ( "original", img );
+    //Gaussian Blur
+    Mat blurred;
+    blur ( img, blurred, Size ( 3,3 ) );
+    int rows = blurred.rows;
+    int cols = blurred.cols;
+    // imshow ("Blurred", blurred);
+
+    cout << rows << " " << cols << endl;
 
     // Compute image gradient
     Mat xComponent, yComponent;
