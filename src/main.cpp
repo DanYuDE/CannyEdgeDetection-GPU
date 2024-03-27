@@ -71,7 +71,6 @@ int main ( int argc, char* argv[] ) {
     // Create a command queue
     cl::CommandQueue queue ( context, device, CL_QUEUE_PROFILING_ENABLE );
 
-
     // Load the source code
     extern unsigned char canny_cl[];
     extern unsigned int canny_cl_len;
@@ -118,7 +117,7 @@ int main ( int argc, char* argv[] ) {
 
         cout << "CPU implementation successfully!" << endl;
 
-        // For GPU
+        // GPU ----------------------------------------------------
         if ( img.type() != CV_32F ) {
             img.convertTo ( img, CV_32F, 1/255.0 );
             }
@@ -154,7 +153,6 @@ int main ( int argc, char* argv[] ) {
         region[1] = countY;
         region[2] = 1;
 
-        // GPU ----------------------------------------------------
         // Allocate space for output data on the device
         cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
                                cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
