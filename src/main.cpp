@@ -49,7 +49,6 @@ Mat GaussianFilter ( const Mat& src );
 Mat NonMaximumSuppression ( const Mat& magnitude, const Mat& blurred, const Mat& angle );
 void DoubleThresholding ( const Mat& magnitude, Mat& strong, Mat& weak );
 Mat Hysteresis ( Mat& strong, const Mat& weak );
-cl::Image2D createImage2DFromMat ( const cl::Context& context, const Mat& mat, bool readOnly );
 void chooseStageToDisplay ( const Mat* GPtr, const Mat* BlPtr, const Mat* sblPtr, const Mat* NMSPtr, const Mat* DTSPtr, const Mat* DTWPtr, const Mat* FinalPtr );
 
 int main ( int argc, char* argv[] ) {
@@ -126,8 +125,6 @@ int main ( int argc, char* argv[] ) {
         std::vector<float> imgVector;
         imgVector.assign ( ( float* ) img.datastart, ( float* ) img.dataend );
 
-        cl::Image2D image2D = createImage2DFromMat ( context, img, true );
-
         // Get the maximum work-group size for the device using C++ API
         std::size_t maxWorkGroupSize;
         device.getInfo ( CL_DEVICE_MAX_WORK_GROUP_SIZE, &maxWorkGroupSize );
@@ -148,12 +145,6 @@ int main ( int argc, char* argv[] ) {
 
         cout << "Count x:" << countX << " Count Y: " << countY << endl;
 
-        // Allocate space for output data on the device
-        cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
-                               cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
-
-        cout << "Convert Mat to image2D successfully" << endl;
-
         cl::size_t<3> origin;
         origin[0] = 0;
         origin[1] = 0;
@@ -164,6 +155,11 @@ int main ( int argc, char* argv[] ) {
         region[2] = 1;
 
         // GPU ----------------------------------------------------
+        // Allocate space for output data on the device
+        cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
+                               cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
+
+        // Allocate the host memory space for the output and initialize the device-side image with it
         Mat h_outputGpu ( countY, countX, CV_32F );
         queue.enqueueWriteImage ( d_output, true, origin, region,
                                   countX * sizeof ( float ), 0, h_outputGpu.data );
@@ -173,9 +169,11 @@ int main ( int argc, char* argv[] ) {
         image = cl::Image2D ( context, CL_MEM_READ_WRITE,
                               cl::ImageFormat ( CL_R, CL_FLOAT ), countX, countY );
 
+        // Transfer input image data from host to device by writing it to an OpenCL Image2D object
         queue.enqueueWriteImage ( image, true, origin, region,
                                   countX * sizeof ( float ), 0, imgVector.data(), NULL,
                                   &copy1 );
+        cout << "Convert Mat to image2D successfully" << endl;
 
         Mat h_intermediate_blur ( countY, countX, CV_32F );
         Mat h_intermediate_sbl ( countY, countX, CV_32F );
@@ -215,7 +213,7 @@ int main ( int argc, char* argv[] ) {
         const int maskSize = 1; // For a 3x3 mask, maskSize would be 1.
         // Create a buffer for the mask on the OpenCL device.
         cl::Buffer maskBuffer = cl::Buffer ( context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof ( mask ), const_cast<float*> ( mask ) );
-        gbKernel.setArg<cl::Image2D> ( 0, image2D );
+        gbKernel.setArg<cl::Image2D> ( 0, image );
         gbKernel.setArg<cl::Buffer> ( 1, maskBuffer );
         gbKernel.setArg<cl::Image2D> ( 2, bufferGBtoSBL );
         gbKernel.setArg<cl_int> ( 3, maskSize );
@@ -530,28 +528,6 @@ int cpuFunction ( const Mat& img ) {
     Mat finalEdges = Hysteresis ( strong, weak );
 
     return 0;
-    }
-
-// Function to create cl::Image2D from cv::Mat
-cl::Image2D createImage2DFromMat ( const cl::Context& context, const Mat& mat, bool readOnly ) {
-    cl_int err;
-    cl::ImageFormat format;
-
-    // Image format
-    format = cl::ImageFormat ( CL_R, CL_FLOAT );
-
-    // Ensure mat data is continuous and in a suitable format
-    cv::Mat continuousMat = mat.clone();
-
-    cl_mem_flags flags = readOnly ? CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR : CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR;
-
-    // Create cl::Image2D
-    cl::Image2D image ( context, flags, format, mat.cols, mat.rows, 0, continuousMat.data, &err );
-    if ( err != CL_SUCCESS ) {
-        throw std::runtime_error ( "Failed to create cl::Image2D from cv::Mat" );
-        }
-
-    return image;
     }
 
 void displayImage ( const string& windowName, const Mat& image ) {
