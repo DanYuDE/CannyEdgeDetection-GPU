@@ -478,8 +478,6 @@ void DoubleThresholding ( const Mat& magnitude, Mat& strong, Mat& weak ) {
     }
 
 Mat Hysteresis ( Mat& strong, const Mat& weak ) {
-    // imshow ( "strong_test", strong );
-    // imshow ( "weak_test", weak );
     for ( int x = 0; x < strong.rows; x++ ) {
         for ( int y = 0; y < strong.cols; y++ ) {
             if ( weak.at<float> ( x, y ) != 0 ) {
@@ -500,13 +498,11 @@ Mat Hysteresis ( Mat& strong, const Mat& weak ) {
     }
 
 int cpuFunction ( const Mat& img ) {
-    // imshow ( "original", img );
     //Gaussian Blur
     Mat blurred;
     blur ( img, blurred, Size ( 3,3 ) );
     int rows = blurred.rows;
     int cols = blurred.cols;
-    // imshow ("Blurred", blurred);
 
     cout << rows << " " << cols << endl;
 
@@ -522,22 +518,16 @@ int cpuFunction ( const Mat& img ) {
     // Normalize values
     normalize ( magnitude, magnitude, 0, 1, NORM_MINMAX );
 
-    // imshow ( "sobel", blurred );
     // Apply non-maximum suppression
     Mat suppressed = NonMaximumSuppression ( magnitude, blurred, angle );
-    // imshow ( "non-max suppression", suppressed );
 
     // Apply double thresholding
     Mat strong = Mat::zeros ( magnitude.rows, magnitude.cols, CV_32F );
     Mat weak = Mat::zeros ( magnitude.rows, magnitude.cols, CV_32F );
     DoubleThresholding ( suppressed, strong, weak );
-    // imshow ( "strong", strong );
-    // imshow ( "Weak", weak );
 
     // Apply hysteresis
     Mat finalEdges = Hysteresis ( strong, weak );
-    // imshow ( "final edge detection", finalEdges );
-    // waitKey ( 0 );
 
     return 0;
     }
