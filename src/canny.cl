@@ -2,27 +2,30 @@
 #include "../lib/OpenCL/OpenCLKernel.hpp"  // Hack to make syntax highlighting work
 #endif
 
+// Function to get the value of a pixel from an image, assuming a single-channel float format
 inline float getValueImage(__read_only image2d_t image, int x, int y, const sampler_t sampler) {
     int2 coords = (int2)(x, y); // Create a 2D integer vector for coordinates
     float4 pixel = read_imagef(image, sampler, coords); // Read the pixel value using the sampler
     return pixel.x; // Return the first channel assuming image format is single channel float
 }
 
+const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE |  // Use unnormalized coordinates
+                              CLK_ADDRESS_CLAMP_TO_EDGE |    // Clamp to edge addressing mode
+                              CLK_FILTER_NEAREST;            // Use nearest neighbor for interpolation
+
+// Kernel for applying Gaussian Blur on an image
 __kernel void GaussianBlur(
-    __read_only image2d_t image,
-    __constant float* mask,
-    __write_only image2d_t blurredImage,
-    __private int maskSize
+    __read_only image2d_t image,  // Input image
+    __constant float* mask,  // Gaussian mask (kernel)
+    __write_only image2d_t blurredImage,  // Output image for the blurred result
+    __private int maskSize  // Radius of the Gaussian mask
 ) {
     int x = get_global_id(0);
     int y = get_global_id(1);
 
-    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE |
-                              CLK_ADDRESS_CLAMP_TO_EDGE |
-                              CLK_FILTER_NEAREST;
+    float sum = 0.0f;  // Initialize sum for the convolution
 
-    float sum = 0.0f;
-
+    // Loop over the mask size to perform the convolution
     for(int a = -maskSize; a <= maskSize; a++) {
         for(int b = -maskSize; b <= maskSize; b++) {
             int2 readPos = (int2)(x + a, y + b);
@@ -35,15 +38,15 @@ __kernel void GaussianBlur(
     write_imagef(blurredImage, (int2)(x, y), (float4)(sum, 0.0f, 0.0f, 0.0f));
 }
 
-
+// Kernel for calculating the Sobel edge magnitude
 __kernel void Sobel(__read_only image2d_t blurredImage,
                            __write_only image2d_t bufferSBLtoNMS) {
     int x = get_global_id(0);
     int y = get_global_id(1);
 
-    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | // Non-normalized coordinates
-                              CLK_ADDRESS_CLAMP |            // Clamp to edge
-                              CLK_FILTER_NEAREST;           // Nearest neighbor interpolation
+//     const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | // Non-normalized coordinates
+//                               CLK_ADDRESS_CLAMP |            // Clamp to edge
+//                               CLK_FILTER_NEAREST;           // Nearest neighbor interpolation
 
     // Sobel filter in X direction (horizontal edges)
     float Gx = -1 * getValueImage(blurredImage, x - 1, y - 1, sampler)
@@ -70,14 +73,10 @@ __kernel void Sobel(__read_only image2d_t blurredImage,
 
 }
 
-
+// Kernel for performing Non-Maximum Suppression
 __kernel void NonMaximumSuppression(__read_only image2d_t bufferSBLtoNMS,
                                     __write_only image2d_t bufferNMStoDT) {
-    int2 pos = (int2)(get_global_id(0), get_global_id(1));
-    // Create a sampler object
-    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | // Non-normalized coordinates
-                              CLK_ADDRESS_CLAMP_TO_EDGE |    // Clamp to edge addressing mode
-                              CLK_FILTER_NEAREST;            // Nearest neighbor interpolation
+    int2 pos = (int2)(get_global_id(0), get_global_id(1));         // Nearest neighbor interpolation
 
     // Corrected usage of read_imagef with a sampler
     float2 gradient = read_imagef(bufferSBLtoNMS, sampler, pos).xy;
@@ -127,20 +126,22 @@ __kernel void NonMaximumSuppression(__read_only image2d_t bufferSBLtoNMS,
 
 
 __kernel void DoubleThresholding(
-    read_only image2d_t magnitudeImg,
-    write_only image2d_t strongImg,
-    write_only image2d_t weakImg,
-    const float magMax,
-    const float magMin
+    read_only image2d_t magnitudeImg, // Input image containing gradient magnitudes
+    write_only image2d_t strongImg,   // Output image for strong edges
+    write_only image2d_t weakImg,     // Output image for weak edges
+    const float magMax,               // Upper threshold for strong edges
+    const float magMin                // Lower threshold for weak edges
 ){
+    // Calculate the current pixel position
     int2 pos = (int2)(get_global_id(0), get_global_id(1));
-    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE |
-                              CLK_ADDRESS_CLAMP_TO_EDGE |
-                              CLK_FILTER_NEAREST;
 
+    // Read the gradient magnitude for the current pixel
     float gradientMagnitude = read_imagef(magnitudeImg, sampler, pos).x;
 
+    // Initialize variables to store the output values for strong and weak edges
     float strongVal = 0.0f, weakVal = 0.0f;
+
+    // If the gradient magnitude exceeds the upper threshold, it's a strong edge. Otherwise, it's a weak edge
     if (gradientMagnitude > magMax) {
         strongVal = 1.0f; // Strong edge
     } else if (gradientMagnitude > magMin) {
@@ -158,12 +159,9 @@ __kernel void Hysteresis(
 ){
     int x = get_global_id(0);
     int y = get_global_id(1);
-    const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE |
-                          CLK_ADDRESS_CLAMP |
-                          CLK_FILTER_NEAREST;
 
-    float strong = read_imagef(strongImg, smp, (int2)(x, y)).x;
-    float weak = read_imagef(weakImg, smp, (int2)(x, y)).x;
+    float strong = read_imagef(strongImg, sampler, (int2)(x, y)).x;
+    float weak = read_imagef(weakImg, sampler, (int2)(x, y)).x;
     float output = strong; // Start with strong edges
 
     if (strong == 0.0f && weak != 0.0f) {
@@ -171,7 +169,7 @@ __kernel void Hysteresis(
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 if (dx == 0 && dy == 0) continue; // Skip the center pixel
-                float neighborStrong = read_imagef(strongImg, smp, (int2)(x + dx, y + dy)).x;
+                float neighborStrong = read_imagef(strongImg, sampler, (int2)(x + dx, y + dy)).x;
                 if (neighborStrong != 0.0f) {
                     output = 1.0f; // Promote to strong edge
                     break;
