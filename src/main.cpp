@@ -133,7 +133,7 @@ int main ( int argc, char* argv[] ) {
         device.getInfo ( CL_DEVICE_MAX_WORK_GROUP_SIZE, &maxWorkGroupSize );
 
         std::size_t baseWgSize = std::sqrt ( maxWorkGroupSize ); // Calculate a base work-group size
-        std::size_t wgSizeX = std::min ( baseWgSize, static_cast<std::size_t> ( 16 ) ); // Choose a reasonable default or based on experimentation
+        std::size_t wgSizeX = std::min ( baseWgSize, static_cast<std::size_t> ( 16 ) );
         std::size_t wgSizeY = wgSizeX; // Same as wgSizeX for square work groups
 
         // Obtain image dimensions
@@ -145,8 +145,8 @@ int main ( int argc, char* argv[] ) {
         std::size_t countY = ( ( imgHeight + wgSizeY - 1 ) / wgSizeY ) * wgSizeY;
         std::size_t count = countX * countY;       // Overall number of elements
         // std::size_t size = count * sizeof ( float ); // Size of data in bytes
-        Mat h_outputGpu ( countY, countX, CV_32F );
-        cout << "COunt x:" << countX << " Count Y: " << countY << endl;
+
+        cout << "Count x:" << countX << " Count Y: " << countY << endl;
 
         // Allocate space for output data on the device
         cl::Image2D d_output ( context, CL_MEM_READ_WRITE,
@@ -164,7 +164,7 @@ int main ( int argc, char* argv[] ) {
         region[2] = 1;
 
         // GPU ----------------------------------------------------
-        // memset ( h_outputGpu.data(), 255, size );
+        Mat h_outputGpu ( countY, countX, CV_32F );
         queue.enqueueWriteImage ( d_output, true, origin, region,
                                   countX * sizeof ( float ), 0, h_outputGpu.data );
 
@@ -537,11 +537,11 @@ cl::Image2D createImage2DFromMat ( const cl::Context& context, const Mat& mat, b
     cl_int err;
     cl::ImageFormat format;
 
-    // Example format - adjust based on your cv::Mat type
+    // Image format
     format = cl::ImageFormat ( CL_R, CL_FLOAT );
 
     // Ensure mat data is continuous and in a suitable format
-    cv::Mat continuousMat = mat.clone(); // Simplified; consider adjusting format as needed
+    cv::Mat continuousMat = mat.clone();
 
     cl_mem_flags flags = readOnly ? CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR : CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR;
 
