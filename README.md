@@ -6,14 +6,14 @@ This project is a implementation of the Canny Edge Detection algorithm in C++ an
 ## Installation
 
 ```bash
-git clone https://github.com/username/project.git
+git clone https://github.com/DanYuDE/CannyEdgeDetection-GPU.git
 ```
 
 ## Usage
 
 Create a build directory.
 ```bash
-cd project
+cd CannyEdgeDetection-GPU
 mkdir build
 cd build
 ```
