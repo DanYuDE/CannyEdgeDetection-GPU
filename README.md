@@ -19,7 +19,7 @@ cd build
 ```
 
 Compile the project with meson and ninja.
-```bash\
+```bash
 meson configure
 ninja
 ```
