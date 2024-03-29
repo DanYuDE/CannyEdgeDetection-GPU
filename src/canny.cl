@@ -2,7 +2,7 @@
 #include "../lib/OpenCL/OpenCLKernel.hpp"  // Hack to make syntax highlighting work
 #endif
 
-// Function to get the value of a pixel from an image, assuming a single-channel float format
+// Function to get the value of a pixel from an image
 inline float getValueImage(__read_only image2d_t image, int x, int y, const sampler_t sampler) {
     int2 coords = (int2)(x, y); // Create a 2D integer vector for coordinates
     float4 pixel = read_imagef(image, sampler, coords); // Read the pixel value using the sampler
