@@ -1,6 +1,6 @@
-//Reference:
-//https://github.com/akwCode/CED/blob/main/CED.cpp
-
+// Reference: https://github.com/akwCode/CED/blob/main/CED.cpp
+// We revise the original main function and separate it into multiple functions.
+// The canny.cl is achieved on our own.
 #include <stdio.h>
 
 #include <cmath>
