@@ -159,8 +159,6 @@ int main ( int argc, char* argv[] ) {
 
         // Allocate the host memory space for the output and initialize the device-side image with it
         Mat h_outputGpu ( countY, countX, CV_32F );
-        queue.enqueueWriteImage ( d_output, true, origin, region,
-                                  countX * sizeof ( float ), 0, h_outputGpu.data );
 
         cl::Event copy1;
         cl::Image2D image;
@@ -262,9 +260,9 @@ int main ( int argc, char* argv[] ) {
                                  countX * sizeof ( float ), 0, h_intermediate_sbl.data, NULL );
         double minVal, maxVal;
         cv::minMaxLoc ( h_intermediate_sbl, &minVal, &maxVal );
-        cv::Mat displayImg0;
-        cv::normalize ( h_intermediate_sbl, displayImg0, 0, 255, cv::NORM_MINMAX );
-        displayImg0.convertTo ( displayImg0, CV_8U );
+        cv::Mat displayImgSBL;
+        cv::normalize ( h_intermediate_sbl, displayImgSBL, 0, 255, cv::NORM_MINMAX );
+        displayImgSBL.convertTo ( displayImgSBL, CV_8U );
 
         // Non-Maximum Suppression Kernel -------------------------------------------------------
         queue.enqueueNDRangeKernel ( nmsKernel, cl::NullRange,
@@ -278,9 +276,9 @@ int main ( int argc, char* argv[] ) {
         double minVal1, maxVal1;
         cv::minMaxLoc ( h_intermediate_nms, &minVal1, &maxVal1 );
         // std::cout << "NMS Min: " << minVal1 << ", Max: " << maxVal1 << std::endl;
-        cv::Mat displayImg1;
-        cv::normalize ( h_intermediate_nms, displayImg1, 0, 255, cv::NORM_MINMAX );
-        displayImg1.convertTo ( displayImg1, CV_8U );
+        cv::Mat displayImgNMS;
+        cv::normalize ( h_intermediate_nms, displayImgNMS, 0, 255, cv::NORM_MINMAX );
+        displayImgNMS.convertTo ( displayImgNMS, CV_8U );
 
         // Double Thresholding Kernel -----------------------------------------------------------
         queue.enqueueNDRangeKernel ( dtKernel, cl::NullRange,
@@ -293,9 +291,9 @@ int main ( int argc, char* argv[] ) {
                                  countX * sizeof ( float ), 0, h_intermediate_strong.data, NULL );
         double minVal2, maxVal2;
         cv::minMaxLoc ( h_intermediate_strong, &minVal2, &maxVal2 );
-        cv::Mat displayImg2;
-        cv::normalize ( h_intermediate_strong, displayImg2, 0, 255, cv::NORM_MINMAX );
-        displayImg2.convertTo ( displayImg2, CV_8U );
+        cv::Mat displayImgStrong;
+        cv::normalize ( h_intermediate_strong, displayImgStrong, 0, 255, cv::NORM_MINMAX );
+        displayImgStrong.convertTo ( displayImgStrong, CV_8U );
 
         // store Weak Image output image back to host
         queue.enqueueReadImage ( bufferDT_weak_toH, true, origin, region,
@@ -303,9 +301,9 @@ int main ( int argc, char* argv[] ) {
         double minVal3, maxVal3;
         cv::minMaxLoc ( h_intermediate_weak, &minVal3, &maxVal3 );
         // std::cout << "weak Min: " << minVal3 << ", Max: " << maxVal3 << std::endl;
-        cv::Mat displayImg3;
-        cv::normalize ( h_intermediate_weak, displayImg3, 0, 255, cv::NORM_MINMAX );
-        displayImg3.convertTo ( displayImg3, CV_8U );
+        cv::Mat displayImgWeak;
+        cv::normalize ( h_intermediate_weak, displayImgWeak, 0, 255, cv::NORM_MINMAX );
+        displayImgWeak.convertTo ( displayImgWeak, CV_8U );
 
         // Hysteresis Kernel --------------------------------------------------------------------
         queue.enqueueNDRangeKernel ( hKernel, cl::NullRange,
@@ -320,9 +318,9 @@ int main ( int argc, char* argv[] ) {
                                  countX * sizeof ( float ), 0, h_outputGpu.data, NULL, &copy2 );
         double minVal4, maxVal4;
         cv::minMaxLoc ( h_outputGpu, &minVal4, &maxVal4 );
-        cv::Mat displayImg4;
-        cv::normalize ( h_outputGpu, displayImg4, 0, 255, cv::NORM_MINMAX );
-        displayImg4.convertTo ( displayImg4, CV_8U );
+        cv::Mat FinalOutput;
+        cv::normalize ( h_outputGpu, FinalOutput, 0, 255, cv::NORM_MINMAX );
+        FinalOutput.convertTo ( FinalOutput, CV_8U );
         // --------------------------------------------------------
 
         // Print performance data
@@ -345,7 +343,7 @@ int main ( int argc, char* argv[] ) {
              << ( count / overallGpuTime.getSeconds() / 1e6 ) << " MPixel/s)"
              << endl;
 
-        chooseStageToDisplay ( &img, &displayBlur, &displayImg0, &displayImg1, &displayImg2, &displayImg3, &displayImg4 );
+        chooseStageToDisplay ( &img, &displayBlur, &displayImgSBL, &displayImgNMS, &displayImgStrong, &displayImgWeak, &FinalOutput );
 
         cout << "Use another image (any key) or leave (q)?" << endl;
         cout << "Your decision: ";
@@ -596,6 +594,7 @@ void chooseStageToDisplay ( const Mat* GPtr,
                     imshow ( "DoubleThresholding-Strong", *DTSPtr );
                     imshow ( "DoubleThresholding-Weak", *DTWPtr );
                     imshow ( "Final Image", *FinalPtr );
+                    cout << "Click any key to exit" << endl;
                     waitKey ( 0 );
                     destroyAllWindows();
                     break;
