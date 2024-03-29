@@ -66,7 +66,6 @@ __kernel void Sobel(__read_only image2d_t blurredImage,
 
     // Compute magnitude and angle (in radians for further processing)
     float magnitude = hypot(Gx, Gy);
-    float angle = atan2(Gy, Gx);
 
     // Writing out the magnitude to the output image
     write_imagef(bufferSBLtoNMS, (int2)(x, y), (float4)(magnitude, 0, 0, 0));
