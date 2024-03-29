@@ -30,7 +30,7 @@ __kernel void GaussianBlur(
         for(int b = -maskSize; b <= maskSize; b++) {
             int2 readPos = (int2)(x + a, y + b);
             float imageValue = read_imagef(image, sampler, readPos).x;
-            sum += mask[(a + maskSize) + (b + maskSize) * (maskSize * 2 + 1)] * imageValue;
+            sum += mask[(a + maskSize) * (maskSize * 2 + 1) + (b + maskSize)] * imageValue;
         }
     }
 
