@@ -1,6 +1,7 @@
-// Reference: https://github.com/akwCode/CED/blob/main/CED.cpp
-// We revise the original main function and separate it into multiple functions.
-// The canny.cl is achieved on our own.
+// Reference: Adapted and extended from the Canny Edge Detection implementation available at https://github.com/akwCode/CED/blob/main/CED.cpp
+//
+// Modifications: The original `main` function has been refactored into multiple functions for improved modularity and readability. The OpenCL kernel for Canny edge detection (`canny.cl`) was developed independently.
+
 #include <stdio.h>
 
 #include <cmath>
